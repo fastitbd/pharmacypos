@@ -362,16 +362,32 @@ class InvoiceController extends Controller
         if ($userBranchId == 1 && !$filterBranchId) {
             $data['categories'] = Category::orderBy('name', 'ASC')->get();
         } else {
-            $productId = BranchProduct::where('branch_id', $activeBranchId)->pluck('product_id');
-            $categoryId = BranchCategory::where('branch_id', $activeBranchId)->pluck('category_id');
-
-            $allAssignedServiceIds = BranchProduct::pluck('product_id')->toArray();
-            $productsQuery->whereIn('id', $productId);
-            $servicesQuery->where(function($q) use ($productId, $allAssignedServiceIds) {
-                $q->whereIn('id', $productId)
-                  ->orWhereNotIn('id', $allAssignedServiceIds);
+            $productsQuery->whereExists(function ($q) use ($activeBranchId) {
+                $q->select(DB::raw(1))
+                    ->from('branch_products')
+                    ->whereColumn('branch_products.product_id', 'products.id')
+                    ->where('branch_products.branch_id', $activeBranchId);
             });
-            $data['categories'] = Category::whereIn('id', $categoryId)->orderBy('name', 'ASC')->get();
+
+            $servicesQuery->where(function ($q) use ($activeBranchId) {
+                $q->whereExists(function ($sub) use ($activeBranchId) {
+                    $sub->select(DB::raw(1))
+                        ->from('branch_products')
+                        ->whereColumn('branch_products.product_id', 'products.id')
+                        ->where('branch_products.branch_id', $activeBranchId);
+                })->orWhereNotExists(function ($sub) {
+                    $sub->select(DB::raw(1))
+                        ->from('branch_products')
+                        ->whereColumn('branch_products.product_id', 'products.id');
+                });
+            });
+
+            $data['categories'] = Category::whereExists(function ($q) use ($activeBranchId) {
+                $q->select(DB::raw(1))
+                    ->from('branch_categories')
+                    ->whereColumn('branch_categories.category_id', 'categories.id')
+                    ->where('branch_categories.branch_id', $activeBranchId);
+            })->orderBy('name', 'ASC')->get();
         }
 
         $data['products'] = $productsQuery->orderBy('name', 'ASC')->paginate(12);
@@ -2693,8 +2709,15 @@ class InvoiceController extends Controller
         $branchId = ($userBranchId == 1 && $filterBranchId) ? $filterBranchId : $userBranchId;
 
         // Fetch Products for current active branch with stock and units
-        $productIds = BranchProduct::where('branch_id', $branchId)->pluck('product_id');
-        $productsQuery = Product::where('status', 1)->where('is_service', 0)->whereIn('id', $productIds)->with('unit', 'variations');
+        $productsQuery = Product::where('status', 1)->where('is_service', 0)->with('unit', 'variations');
+        if ($branchId) {
+            $productsQuery->whereExists(function ($q) use ($branchId) {
+                $q->select(DB::raw(1))
+                    ->from('branch_products')
+                    ->whereColumn('branch_products.product_id', 'products.id')
+                    ->where('branch_products.branch_id', $branchId);
+            });
+        }
         $products = $productsQuery->get()->map(function($product) {
             return [
                 'id' => $product->id,

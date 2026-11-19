@@ -142,13 +142,11 @@
                             </div>
                             <div class="col-md-2 col-12 mb-3">
                                 <label class="font-weight-bold text-muted small uppercase mb-1">{{ __('Product') }}</label>
-                                <select class="select2" name="product_id" id="product_id">
+                                <select class="form-control select2-ajax-product" name="product_id" id="product_id">
                                     <option value="">{{ __('Select Product') }}</option>
-                                    @foreach ($produc as $product)
-                                        <option value="{{ $product->id }}" {{ $product_id == $product->id ? 'SELECTED' : '' }}>
-                                            {{ $product->name }}
-                                        </option>
-                                    @endforeach
+                                    @if (!empty($selectedProduct))
+                                        <option value="{{ $selectedProduct->id }}" selected>{{ $selectedProduct->name }}</option>
+                                    @endif
                                 </select>
                             </div>
                             <div class="col-md-2 col-12 mb-3">
@@ -1031,6 +1029,33 @@
     </div>
 
     <script>
+        $(document).ready(function() {
+            if ($.isFunction($.fn.select2)) {
+                $('.select2-ajax-product').select2({
+                    placeholder: "{{ __('Select Product') }}",
+                    allowClear: true,
+                    ajax: {
+                        url: "{{ route('product.ajax-search') }}",
+                        dataType: 'json',
+                        delay: 250,
+                        data: function(params) {
+                            return {
+                                q: params.term || ''
+                            };
+                        },
+                        processResults: function(data) {
+                            return {
+                                results: [{ id: '', text: "{{ __('Select Product') }}" }].concat(data.results || [])
+                            };
+                        },
+                        cache: true
+                    },
+                    minimumInputLength: 0,
+                    width: '100%'
+                });
+            }
+        });
+
         // $(doucment).ready(function(){
         $('#resetBtn').click(function() {
             $("#product_id option:first").prop("selected", true).change();

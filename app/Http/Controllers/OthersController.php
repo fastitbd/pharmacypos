@@ -128,25 +128,39 @@ class OthersController extends Controller
         }
 
         $activeBranchId = ($userBranchId == 1 && $filterBranchId) ? $filterBranchId : $userBranchId;
-        $branchProductIds = BranchProduct::where('branch_id', $activeBranchId)->pluck('product_id');
 
         if (strtolower($query) == 'out of stock') {
             $products = Product::where('is_service', 0)
-                ->whereIn('id', $branchProductIds)
+                ->when($activeBranchId, function($q) use ($activeBranchId) {
+                    $q->whereExists(function($sub) use ($activeBranchId) {
+                        $sub->select(DB::raw(1))
+                            ->from('branch_products')
+                            ->whereColumn('branch_products.product_id', 'products.id')
+                            ->where('branch_products.branch_id', $activeBranchId);
+                    });
+                })
                 ->with('unit.related_unit')
                 ->where('status', 1)
                 ->get()
-                ->filter(fn ($p) => (float) product_fake_stock_val($p) <= 0)
+                ->filter(fn ($p) => (float) product_fake_stock_val($p, $activeBranchId) <= 0)
                 ->take(10)
-                ->map(function ($product) {
-                    $product->stock_qty_text = product_stock($product);
-                    $product->stock_qty      = (float) product_fake_stock_val($product);
+                ->map(function ($product) use ($activeBranchId) {
+                    $product->stock_qty_text = product_stock($product, $activeBranchId);
+                    $product->stock_qty      = (float) product_fake_stock_val($product, $activeBranchId);
                     return $product;
                 });
         } else {
-            $products = Product::where(function($q) use ($branchProductIds) {
-                    $q->whereIn('id', $branchProductIds)
-                      ->orWhere('is_service', 1);
+            $products = Product::where(function($q) use ($activeBranchId) {
+                    if ($activeBranchId) {
+                        $q->whereExists(function($sub) use ($activeBranchId) {
+                            $sub->select(DB::raw(1))
+                                ->from('branch_products')
+                                ->whereColumn('branch_products.product_id', 'products.id')
+                                ->where('branch_products.branch_id', $activeBranchId);
+                        })->orWhere('is_service', 1);
+                    } else {
+                        $q->where('status', 1);
+                    }
                 })
                 ->with('unit.related_unit')
                 ->where(function ($q) use ($query, $matchingProductIds) {
@@ -164,9 +178,9 @@ class OthersController extends Controller
                 ->where('status', 1)
                 ->limit(10)
                 ->get()
-                ->map(function ($product) {
-                    $product->stock_qty_text = ($product->is_service == 1) ? __('Service Item') : product_stock($product);
-                    $product->stock_qty      = ($product->is_service == 1) ? 999999 : (float) product_fake_stock_val($product);
+                ->map(function ($product) use ($activeBranchId) {
+                    $product->stock_qty_text = ($product->is_service == 1) ? __('Service Item') : product_stock($product, $activeBranchId);
+                    $product->stock_qty      = ($product->is_service == 1) ? 999999 : (float) product_fake_stock_val($product, $activeBranchId);
                     return $product;
                 });
         }
@@ -239,14 +253,19 @@ class OthersController extends Controller
             $matchingProductIds = array_unique(array_merge($serialProductIds, $purchaseProductIds, $invoiceProductIds, $productImeiIds));
         }
 
-        $branchProductIds = BranchProduct::where('branch_id', $activeBranchId)->pluck('product_id')->toArray();
-        $purchaseProductIds = PurchaseItem::where('branch_id', $activeBranchId)->pluck('product_id')->toArray();
-        $allActiveBranchProductIds = array_unique(array_merge($branchProductIds, $purchaseProductIds));
-
-        $productQuery = Product::where(function($q) use ($allActiveBranchProductIds) {
-                if (!empty($allActiveBranchProductIds)) {
-                    $q->whereIn('id', $allActiveBranchProductIds)
-                      ->orWhere('is_service', 1);
+        $productQuery = Product::where(function($q) use ($activeBranchId) {
+                if ($activeBranchId) {
+                    $q->whereExists(function ($sub) use ($activeBranchId) {
+                        $sub->select(DB::raw(1))
+                            ->from('branch_products')
+                            ->whereColumn('branch_products.product_id', 'products.id')
+                            ->where('branch_products.branch_id', $activeBranchId);
+                    })->orWhereExists(function ($sub) use ($activeBranchId) {
+                        $sub->select(DB::raw(1))
+                            ->from('purchase_items')
+                            ->whereColumn('purchase_items.product_id', 'products.id')
+                            ->where('purchase_items.branch_id', $activeBranchId);
+                    })->orWhere('is_service', 1);
                 } else {
                     $q->where('status', 1);
                 }
@@ -620,11 +639,16 @@ class OthersController extends Controller
         $activeBranchId = $request->filled('branch_id') ? $request->branch_id : (($userBranchId == 1 && $filterBranchId) ? $filterBranchId : $userBranchId);
         $showImei       = trim(strtolower(env('APP_IMEI'))) === 'yes';
 
-        $productIds = \App\Models\BranchProduct::where('branch_id', $activeBranchId)->pluck('product_id');
-
         $query = Product::where('status', 1)
             ->where('is_service', 0)
-            ->whereIn('id', $productIds)
+            ->when($activeBranchId, function($q) use ($activeBranchId) {
+                $q->whereExists(function ($sub) use ($activeBranchId) {
+                    $sub->select(DB::raw(1))
+                        ->from('branch_products')
+                        ->whereColumn('branch_products.product_id', 'products.id')
+                        ->where('branch_products.branch_id', $activeBranchId);
+                });
+            })
             ->where('category_id', $request->cat_id)
             ->with('unit:id,name,related_unit_id,related_value', 'unit.related_unit:id,name');
 

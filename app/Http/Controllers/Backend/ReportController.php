@@ -29,6 +29,7 @@ use App\Models\BranchCategory;
 use App\Models\Rack;
 use App\Models\BranchRack;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 use App\Models\BankTransaction;
 use App\Http\Controllers\Controller;
 use Illuminate\Pagination\LengthAwarePaginator;
@@ -46,45 +47,44 @@ class ReportController extends Controller
 
         $userBranchId = auth()->user()->branch_id;
         $filterBranchId = session('branch_filter_id', null);
+        $targetBranchId = ($userBranchId == 1) ? $filterBranchId : $userBranchId;
+
+        $data['selectedProduct'] = $request->filled('product_id') ? Product::find($request->product_id) : null;
 
         $query = Product::with(['unit.related_unit', 'subCategory', 'racks'])->where('is_service', 0);
 
-        if ($userBranchId == 1) {
-            if ($filterBranchId) {
-                $productIds = BranchProduct::where('branch_id', $filterBranchId)->pluck('product_id');
-                $categoryIds = BranchCategory::where('branch_id', $filterBranchId)->pluck('category_id');
-                $brandIds = BranchBrand::where('branch_id', $filterBranchId)->pluck('brand_id');
-                $rackIds = BranchRack::where('branch_id', $filterBranchId)->pluck('rack_id');
-                $data['produc'] = Product::whereIn('id', $productIds)->with(['unit.related_unit', 'racks'])
-                    ->where('is_service', 0)
-                    ->orderBy('created_at', 'DESC')
-                    ->get();
-                $data['categories'] = Category::whereIn('id', $categoryIds)->orderBy('id', 'desc')->get();
-                $data['brands'] = Brand::whereIn('id', $brandIds)->orderBy('id', 'desc')->get();
-                $data['racks'] = Rack::whereIn('id', $rackIds)->orderBy('name', 'asc')->get();
-                $query->whereIn('id', $productIds);
-            } else {
-                $data['produc'] = Product::with(['unit.related_unit', 'racks'])
-                    ->where('is_service', 0)
-                    ->orderBy('created_at', 'DESC')
-                    ->get();
-                $data['categories'] = Category::orderBy('id', 'desc')->get();
-                $data['brands'] = Brand::orderBy('id', 'desc')->get();
-                $data['racks'] = Rack::orderBy('name', 'asc')->get();
-            }
+        if ($targetBranchId) {
+            $query->whereExists(function ($q) use ($targetBranchId) {
+                $q->select(DB::raw(1))
+                    ->from('branch_products')
+                    ->whereColumn('branch_products.product_id', 'products.id')
+                    ->where('branch_products.branch_id', $targetBranchId);
+            });
+
+            $data['categories'] = Category::whereExists(function ($q) use ($targetBranchId) {
+                $q->select(DB::raw(1))
+                    ->from('branch_categories')
+                    ->whereColumn('branch_categories.category_id', 'categories.id')
+                    ->where('branch_categories.branch_id', $targetBranchId);
+            })->orderBy('name', 'asc')->get(['id', 'name']);
+
+            $data['brands'] = Brand::whereExists(function ($q) use ($targetBranchId) {
+                $q->select(DB::raw(1))
+                    ->from('branch_brands')
+                    ->whereColumn('branch_brands.brand_id', 'brands.id')
+                    ->where('branch_brands.branch_id', $targetBranchId);
+            })->orderBy('name', 'asc')->get(['id', 'name']);
+
+            $data['racks'] = Rack::whereExists(function ($q) use ($targetBranchId) {
+                $q->select(DB::raw(1))
+                    ->from('branch_racks')
+                    ->whereColumn('branch_racks.rack_id', 'racks.id')
+                    ->where('branch_racks.branch_id', $targetBranchId);
+            })->orderBy('name', 'asc')->get(['id', 'name']);
         } else {
-            $productIds = BranchProduct::where('branch_id', $userBranchId)->pluck('product_id');
-            $categoryIds = BranchCategory::where('branch_id', $userBranchId)->pluck('category_id');
-            $brandIds = BranchBrand::where('branch_id', $userBranchId)->pluck('brand_id');
-            $rackIds = BranchRack::where('branch_id', $userBranchId)->pluck('rack_id');
-            $data['produc'] = Product::whereIn('id', $productIds)->with(['unit.related_unit', 'racks'])
-                ->where('is_service', 0)
-                ->orderBy('created_at', 'DESC')
-                ->get();
-            $data['categories'] = Category::whereIn('id', $categoryIds)->orderBy('id', 'desc')->get();
-            $data['brands'] = Brand::whereIn('id', $brandIds)->orderBy('id', 'desc')->get();
-            $data['racks'] = Rack::whereIn('id', $rackIds)->orderBy('name', 'asc')->get();
-            $query->whereIn('id', $productIds);
+            $data['categories'] = Category::orderBy('name', 'asc')->get(['id', 'name']);
+            $data['brands'] = Brand::orderBy('name', 'asc')->get(['id', 'name']);
+            $data['racks'] = Rack::orderBy('name', 'asc')->get(['id', 'name']);
         }
 
         if ($request->product_id != null) {
@@ -118,62 +118,134 @@ class ReportController extends Controller
             }
         }
 
-        $allProductsQuery = clone $query;
-        $allProducts = $allProductsQuery->with('product_variations')->get();
-
-        $data['products'] = $query
+        $data['products'] = (clone $query)
             ->orderBy('created_at', 'DESC')
             ->paginate(20)->appends($request->all());
 
-        // grand totals
-        $grand_purchase   = 0;
-        $grand_sale       = 0;
-        $grand_transfer   = 0;
-        $grand_receive    = 0;
-        $grand_sale_ret   = 0;
-        $grand_pur_ret    = 0;
-        $grand_damage     = 0;
-        $grand_stock_qty  = 0;
-        $grand_adjust_in_total = 0;
-        $grand_adjust_out_total = 0;
-        $grand_purchase_value = 0;
-        $grand_mrp_value = 0;
+        // Fast SQL Aggregate Grand Totals (O(1) queries instead of O(N) looping)
+        $hasFilters = $request->filled('product_id') || $request->filled('category_id') || $request->filled('brand_id') || $request->filled('sub_category_id') || !empty($keyword);
+        $filteredProductIds = (clone $query)->select('products.id');
 
-        $branchIdForStock = ($userBranchId == 1 && $filterBranchId) ? $filterBranchId : ($userBranchId == 1 ? null : $userBranchId);
-
-        foreach ($allProducts as $product) {
-            $purchase = (float) purchased_qty($product);
-            $sale     = (float) invoiced_qty($product);
-            $transfer = (float) stock_transfer_qty($product);
-            $receive  = (float) stock_receive_qty($product);
-            $sale_ret = (float) returned_qty($product);
-            $pur_ret  = (float) return_pur_qty($product);
-            $damage   = (float) damaged_qty($product);
-            $adjust_in_total = (float) adjust_in($product);
-            $adjust_out_total = (float) adjust_out($product);
-
-            $factor = ($product->unit && $product->unit->related_value) ? (float)$product->unit->related_value : 1;
-            if ($factor <= 0) $factor = 1;
-            $fakeStockQty = product_fake_stock_val($product, $branchIdForStock);
-            $stock = $fakeStockQty / $factor;
-
-            $unitCost = product_purchase_unit_cost($product, $branchIdForStock);
-            $sellingPriceUnit = ((float) ($product->selling_price ?: $product->dis_selling_price)) / $factor;
-
-            $grand_purchase  += $purchase;
-            $grand_sale      += $sale;
-            $grand_transfer  += $transfer;
-            $grand_receive   += $receive;
-            $grand_sale_ret  += $sale_ret;
-            $grand_pur_ret   += $pur_ret;
-            $grand_damage    += $damage;
-            $grand_stock_qty += $stock;
-            $grand_adjust_in_total += $adjust_in_total;
-            $grand_adjust_out_total += $adjust_out_total;
-
-            $grand_purchase_value += ($fakeStockQty * $unitCost);
-            $grand_mrp_value += ($fakeStockQty * $sellingPriceUnit);
+        // 1. Grand Purchase
+        $purchaseQ = DB::table('purchase_items')
+            ->join('purchases', 'purchases.id', '=', 'purchase_items.purchase_id')
+            ->where(function ($q) {
+                $q->whereNull('purchases.is_transfer')->orWhere('purchases.is_transfer', 0);
+            });
+        if ($targetBranchId) {
+            $purchaseQ->where('purchase_items.branch_id', $targetBranchId);
         }
+        if ($request->filled('product_id')) {
+            $purchaseQ->where('purchase_items.product_id', $request->product_id);
+        } elseif ($hasFilters) {
+            $purchaseQ->whereIn('purchase_items.product_id', $filteredProductIds);
+        }
+        $grand_purchase = (float) $purchaseQ->sum('purchase_items.main_qty');
+
+        // 2. Grand Sale
+        $saleQ = DB::table('invoice_items')
+            ->join('invoices', 'invoices.id', '=', 'invoice_items.invoice_id')
+            ->where('invoices.status', 1);
+        if ($targetBranchId) {
+            $saleQ->where('invoice_items.branch_id', $targetBranchId);
+        }
+        if ($request->filled('product_id')) {
+            $saleQ->where('invoice_items.product_id', $request->product_id);
+        } elseif ($hasFilters) {
+            $saleQ->whereIn('invoice_items.product_id', $filteredProductIds);
+        }
+        $grand_sale = (float) $saleQ->sum('invoice_items.actual_main');
+
+        // 3. Grand Transfers & Receives
+        $transferQ = DB::table('transfer_items');
+        $receiveQ = DB::table('transfer_items')->where('status', 1);
+        if ($targetBranchId) {
+            $transferQ->where('from_branch_id', $targetBranchId);
+            $receiveQ->where('to_branch_id', $targetBranchId);
+        }
+        if ($request->filled('product_id')) {
+            $transferQ->where('product_id', $request->product_id);
+            $receiveQ->where('product_id', $request->product_id);
+        } elseif ($hasFilters) {
+            $transferQ->whereIn('product_id', $filteredProductIds);
+            $receiveQ->whereIn('product_id', $filteredProductIds);
+        }
+        $grand_transfer = (float) $transferQ->sum('main_qty');
+        $grand_receive = (float) $receiveQ->sum('main_qty');
+
+        // 4. Grand Sale Return & Purchase Return
+        $saleRetQ = DB::table('return_items');
+        if ($targetBranchId) {
+            $saleRetQ->where('branch_id', $targetBranchId);
+        }
+        if ($request->filled('product_id')) {
+            $saleRetQ->where('product_id', $request->product_id);
+        } elseif ($hasFilters) {
+            $saleRetQ->whereIn('product_id', $filteredProductIds);
+        }
+        $grand_sale_ret = (float) $saleRetQ->sum('main_qty');
+
+        $purRetQ = DB::table('return_purchase_items');
+        if ($targetBranchId) {
+            $purRetQ->where('branch_id', $targetBranchId);
+        }
+        if ($request->filled('product_id')) {
+            $purRetQ->where('product_id', $request->product_id);
+        } elseif ($hasFilters) {
+            $purRetQ->whereIn('product_id', $filteredProductIds);
+        }
+        $grand_pur_ret = (float) $purRetQ->sum('main_qty');
+
+        // 5. Grand Damage
+        $damageQ = DB::table('damage_items');
+        if ($targetBranchId) {
+            $damageQ->where('branch_id', $targetBranchId);
+        }
+        if ($request->filled('product_id')) {
+            $damageQ->where('product_id', $request->product_id);
+        } elseif ($hasFilters) {
+            $damageQ->whereIn('product_id', $filteredProductIds);
+        }
+        $grand_damage = (float) $damageQ->sum('main_qty');
+
+        // 6. Grand Adjust In & Adjust Out
+        $adjInQ = DB::table('adjust_stock_items')->where('stock_status', 1);
+        $adjOutQ = DB::table('adjust_stock_items')->where('stock_status', 0);
+        if ($targetBranchId) {
+            $adjInQ->where('branch_id', $targetBranchId);
+            $adjOutQ->where('branch_id', $targetBranchId);
+        }
+        if ($request->filled('product_id')) {
+            $adjInQ->where('product_id', $request->product_id);
+            $adjOutQ->where('product_id', $request->product_id);
+        } elseif ($hasFilters) {
+            $adjInQ->whereIn('product_id', $filteredProductIds);
+            $adjOutQ->whereIn('product_id', $filteredProductIds);
+        }
+        $grand_adjust_in_total = (float) $adjInQ->sum('main_qty');
+        $grand_adjust_out_total = (float) $adjOutQ->sum('main_qty');
+
+        // 7. Grand Stock Qty, Grand Purchase Value, Grand MRP Value
+        $stockQ = DB::table('purchase_items as pi')
+            ->join('products as p', 'p.id', '=', 'pi.product_id')
+            ->where('pi.stock_qty', '>', 0);
+        if ($targetBranchId) {
+            $stockQ->where('pi.branch_id', $targetBranchId);
+        }
+        if ($request->filled('product_id')) {
+            $stockQ->where('pi.product_id', $request->product_id);
+        } elseif ($hasFilters) {
+            $stockQ->whereIn('pi.product_id', $filteredProductIds);
+        }
+        $stockTotals = $stockQ->selectRaw('
+            SUM(pi.stock_qty) as total_stock_qty,
+            SUM(pi.stock_qty * pi.rate) as total_purchase_val,
+            SUM(pi.stock_qty * COALESCE(NULLIF(p.selling_price, 0), p.dis_selling_price, 0)) as total_mrp_val
+        ')->first();
+
+        $grand_stock_qty = (float) ($stockTotals->total_stock_qty ?? 0);
+        $grand_purchase_value = (float) ($stockTotals->total_purchase_val ?? 0);
+        $grand_mrp_value = (float) ($stockTotals->total_mrp_val ?? 0);
 
         return view('backend.pages.report.sc_stock', $data, compact(
             'grand_purchase',
