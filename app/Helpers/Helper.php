@@ -1796,7 +1796,7 @@ function invoiceSMS($customer_id, $invoice_id)
     }
 }
 
-function calculateUnitPriceUsingFIFO($productId, $requiredQty, $variationId = null, $branchId = null)
+function calculateUnitPriceUsingFIFO($productId, $requiredQty, $variationId = null, $branchId = null, $expireDate = null)
 {
     $product = Product::find($productId);
 
@@ -1819,6 +1819,10 @@ function calculateUnitPriceUsingFIFO($productId, $requiredQty, $variationId = nu
             $query->where('product_variation_id', $variationId);
         } else {
             $query->whereNull('product_variation_id'); // for products without variation
+        }
+
+        if (!empty($expireDate)) {
+            $query->where('expire_date', $expireDate);
         }
 
         $purchaseItems = $query->get();
@@ -1858,6 +1862,10 @@ function calculateUnitPriceUsingFIFO($productId, $requiredQty, $variationId = nu
                 $fallbackQuery->where('branch_id', $effectiveBranchId);
             }
 
+            if (!empty($expireDate)) {
+                $fallbackQuery->where('expire_date', $expireDate);
+            }
+
             if ($variationId !== null && $variationId !== '') {
                 $fallbackQuery->where(function($q) use ($variationId) {
                     $q->whereNull('product_variation_id')->orWhere('product_variation_id', '!=', $variationId);
@@ -1865,6 +1873,18 @@ function calculateUnitPriceUsingFIFO($productId, $requiredQty, $variationId = nu
             }
 
             $fallbackItems = $fallbackQuery->get();
+            // If still empty and expireDate was specified, fallback without expireDate
+            if ($fallbackItems->isEmpty() && !empty($expireDate)) {
+                $generalFallbackQuery = PurchaseItem::where('product_id', $productId)
+                    ->where('stock_qty', '>', 0)
+                    ->orderBy('date', 'asc')
+                    ->orderBy('id', 'asc');
+                if ($effectiveBranchId) {
+                    $generalFallbackQuery->where('branch_id', $effectiveBranchId);
+                }
+                $fallbackItems = $generalFallbackQuery->get();
+            }
+
             foreach ($fallbackItems as $item) {
                 if ($remainingQty <= 0) break;
 
@@ -1989,7 +2009,7 @@ function calculateUnitPriceUsingFIFO($productId, $requiredQty, $variationId = nu
 // }
 
 
-function restoreToFIFO($productId, $qtyToRestore, $variationId = null, $branchId = null)
+function restoreToFIFO($productId, $qtyToRestore, $variationId = null, $branchId = null, $expireDate = null)
 {
     $product = Product::find($productId);
     if (!$product || $product->is_service == 1) return;
@@ -2011,6 +2031,10 @@ function restoreToFIFO($productId, $qtyToRestore, $variationId = null, $branchId
         $query->where('branch_id', $effectiveBranchId);
     }
 
+    if (!empty($expireDate)) {
+        $query->where('expire_date', $expireDate);
+    }
+
     $purchaseItems = $query->get();
 
     // Fallback if empty and variationId was given (or was null)
@@ -2019,7 +2043,19 @@ function restoreToFIFO($productId, $qtyToRestore, $variationId = null, $branchId
         if ($effectiveBranchId) {
             $fallbackQuery->where('branch_id', $effectiveBranchId);
         }
+        if (!empty($expireDate)) {
+            $fallbackQuery->where('expire_date', $expireDate);
+        }
         $purchaseItems = $fallbackQuery->get();
+
+        // If still empty and expireDate was specified, fallback without expireDate
+        if ($purchaseItems->isEmpty() && !empty($expireDate)) {
+            $generalFallback = PurchaseItem::where('product_id', $productId)->orderBy('id', 'desc');
+            if ($effectiveBranchId) {
+                $generalFallback->where('branch_id', $effectiveBranchId);
+            }
+            $purchaseItems = $generalFallback->get();
+        }
     }
 
     $remaining = (float) $qtyToRestore;
@@ -2097,7 +2133,7 @@ function restoreToFIFO($productId, $qtyToRestore, $variationId = null, $branchId
 // }
 
 
-function reduceStockFIFO($productId, $requiredQty, $variationId = null, $branchId = null)
+function reduceStockFIFO($productId, $requiredQty, $variationId = null, $branchId = null, $expireDate = null)
 {
     $product = Product::find($productId);
 
@@ -2122,7 +2158,26 @@ function reduceStockFIFO($productId, $requiredQty, $variationId = null, $branchI
         $purchaseItemsQuery->where('branch_id', $effectiveBranchId);
     }
 
+    if (!empty($expireDate)) {
+        $purchaseItemsQuery->where('expire_date', $expireDate);
+    }
+
     $purchaseItems = $purchaseItemsQuery->orderBy('date', 'asc')->orderBy('id', 'asc')->get();
+
+    // If empty and expireDate was specified, fallback without expireDate
+    if ($purchaseItems->isEmpty() && !empty($expireDate)) {
+        $purchaseItemsQueryFallback = PurchaseItem::where('product_id', $productId)
+            ->where('stock_qty', '>', 0);
+        if ($variationId) {
+            $purchaseItemsQueryFallback->where('product_variation_id', $variationId);
+        } else {
+            $purchaseItemsQueryFallback->whereNull('product_variation_id');
+        }
+        if ($effectiveBranchId) {
+            $purchaseItemsQueryFallback->where('branch_id', $effectiveBranchId);
+        }
+        $purchaseItems = $purchaseItemsQueryFallback->orderBy('date', 'asc')->orderBy('id', 'asc')->get();
+    }
 
     $remainingQty = $requiredQty;
     $totalCost = 0;

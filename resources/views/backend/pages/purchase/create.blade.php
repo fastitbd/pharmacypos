@@ -105,6 +105,7 @@
                                                      @endif
                                                      <th width="12%">{{ __('Rate') }}</th>
                                                      <th width="14%">{{ __('Qty') }}</th>
+                                                     <th width="12%">{{ __('Expire Date') }}</th>
                                                      @if (env('APP_WARRANTY') == 'yes')
                                                      <th width="10%">{{ __('Warranty') }}</th>
                                                      @endif
@@ -117,7 +118,7 @@
                                              <tbody id="table_body">
                                              </tbody>
                                              @php
-                                                 $footerColspan = 4 + (env('APP_IMEI') == 'yes' ? 1 : 0) + (env('APP_WARRANTY') == 'yes' ? 1 : 0) + (is_rack_enabled() ? 1 : 0);
+                                                 $footerColspan = 5 + (env('APP_IMEI') == 'yes' ? 1 : 0) + (env('APP_WARRANTY') == 'yes' ? 1 : 0) + (is_rack_enabled() ? 1 : 0);
                                              @endphp
                                              <tfoot>
                                                  <tr>
@@ -330,6 +331,7 @@
                                                 @endif
                                                 <th width="20%">{{ __('Rate') }}</th>
                                                 <th width="15%">{{ __('Qty') }}</th>
+                                                <th width="12%">{{ __('Expire Date') }}</th>
                                                 @if (env('APP_WARRANTY') == 'yes')
                                                 <th width="15%">{{ __('Warranty') }}</th>
                                                 @endif
@@ -704,6 +706,9 @@
                                                     ${quantity_data}
                                                 </div>
                                             </td>
+                                            <td style="width: 140px;">
+                                                <input type="date" class="form-control form-control-sm" name="new_expire_date[${index}]" value="">
+                                            </td>
                                             @if (env('APP_WARRANTY') == 'yes')
                                             @php
                                                 // Dynamic row will evaluate JS w_text
@@ -800,6 +805,9 @@
                                         <div class="d-flex align-items-center justify-content-center">
                                             ${quantity_data}
                                         </div>
+                                    </td>
+                                    <td style="width: 140px;">
+                                        <input type="date" class="form-control form-control-sm" name="new_expire_date[${data.product.id}]" value="">
                                     </td>
                                     @if (env('APP_WARRANTY') == 'yes')
                                     <td class="text-center align-middle">

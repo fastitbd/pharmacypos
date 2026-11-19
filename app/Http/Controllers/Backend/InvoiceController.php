@@ -67,12 +67,11 @@ class InvoiceController extends Controller
         $data['allSupplier'] = \App\Models\Supplier::get();
 
         if ($filterBranchId) {
-            $productIds = BranchProduct::where('branch_id', $filterBranchId)->pluck('product_id');
-            $data['allProduct'] = Product::whereIn('id', $productIds)->orderBy('id', 'desc')->get();
             $query->where('branch_id', $filterBranchId);
-        } else {
-            $data['allProduct'] = Product::orderBy('id', 'desc')->get();
         }
+
+        $data['selectedProduct'] = $request->filled('product_id') ? Product::find($request->product_id) : null;
+        $data['allProduct'] = $data['selectedProduct'] ? collect([$data['selectedProduct']]) : collect([]);
 
         if ($request->filled('branch_id')) {
             $query->where('branch_id', $request->branch_id);
@@ -744,6 +743,24 @@ class InvoiceController extends Controller
                     return redirect()->back()->withInput();
                 }
 
+                // Expire date batch stock validation
+                $expireDate = $request->expire_date[$key] ?? null;
+                if (!empty($expireDate)) {
+                    $batchStock = (float) \App\Models\PurchaseItem::where('product_id', $productId)
+                        ->where('branch_id', $targetBranchId)
+                        ->where('expire_date', $expireDate)
+                        ->sum('stock_qty');
+                    if ($batchStock < $saleQty) {
+                        session()->flash('error', __('Stock Out Error: Selected expire batch (:exp) for product ":prod" has only :avail available, requested :req.', [
+                            'exp' => $expireDate,
+                            'prod' => $product->name,
+                            'avail' => $batchStock,
+                            'req' => $saleQty
+                        ]));
+                        return redirect()->back()->withInput();
+                    }
+                }
+
                 if ($variationId && $appScEnabled) {
                     $varStock = variation_stock($variationId, $targetBranchId);
                     if ($varStock < $saleQty) {
@@ -827,6 +844,9 @@ class InvoiceController extends Controller
                     $variation_id = (!empty($request->variation_id[$key])) ? $request->variation_id[$key] : null;
                     $invoice_item->product_variation_id = $variation_id;
 
+                    // Expire date handle
+                    $invoice_item->expire_date = (!empty($request->expire_date[$key])) ? $request->expire_date[$key] : null;
+
                     // Warranty handle
                     $invoice_item->warranty_value = (!empty($request->warranty_value[$key])) ? $request->warranty_value[$key] : null;
                     $invoice_item->warranty_unit = (!empty($request->warranty_unit[$key])) ? $request->warranty_unit[$key] : null;
@@ -868,7 +888,7 @@ class InvoiceController extends Controller
                             $invoice_item->actual_total = $request->sub_total[$key];
                             $invoice_item->inv_subtotal = $request->sub_total[$key];
                         }
-                        $invoice_item->pur_subtotal = calculateUnitPriceUsingFIFO($product_id, $saleQty, $variation_id, $invoice_item->branch_id);
+                        $invoice_item->pur_subtotal = calculateUnitPriceUsingFIFO($product_id, $saleQty, $variation_id, $invoice_item->branch_id, $invoice_item->expire_date);
                     } else {
                         $invoice_item->main_qty = $request->main_qty[$key];
                         $invoice_item->subtotal = $request->sub_total[$key];
@@ -1176,8 +1196,9 @@ class InvoiceController extends Controller
         $rawItems = InvoiceItem::where('invoice_id', $id)->with(['product.unit.related_unit', 'product.product_variations'])->get();
         $groupedItems = collect();
 
-        foreach ($rawItems->groupBy(fn($i) => $i->product_id . '_' . ($i->product_variation_id ?? 0)) as $group) {
+        foreach ($rawItems->groupBy(fn($i) => $i->product_id . '_' . ($i->product_variation_id ?? 0) . '_' . ($i->expire_date ?? '')) as $group) {
             $first = clone $group->first();
+            $first->expire_date = $group->first()->expire_date;
             $first->main_qty = $group->sum('main_qty');
             $first->sub_qty = $group->sum('sub_qty');
             $first->product_discount = $group->sum(fn($i) => $i->discount_amount ?? 0);
@@ -1493,7 +1514,7 @@ class InvoiceController extends Controller
                     } else {
                         $oldQty = $oldItem->main_qty;
                     }
-                    restoreToFIFO($product->id, $oldQty, $oldItem->product_variation_id, $invoice->branch_id);
+                    restoreToFIFO($product->id, $oldQty, $oldItem->product_variation_id, $invoice->branch_id, $oldItem->expire_date);
                 }
                 
                 $oldItem->delete();
@@ -1512,6 +1533,7 @@ class InvoiceController extends Controller
             foreach ($productIds as $key => $product_id) {
                 $find_unit_id = Product::where('id', $product_id)->first();
                 $variation_id = $request->variation_id[$key] ?? null;
+                $expireDate = $request->expire_date[$key] ?? null;
 
                 $reqMainQty = (float)($request->main_qty[$key] ?? 1);
                 $reqSubQty = (float)($request->sub_qty[$key] ?? 0);
@@ -1527,15 +1549,15 @@ class InvoiceController extends Controller
                     // Row 1: Exchange base portion credited to original invoice date
                     $oldMainQty = round($reqMainQty * $oldRatio, 4);
                     $oldSubQty = round($reqSubQty * $oldRatio, 4);
-                    $this->createInvoiceItemRow($invoice, $find_unit_id, $product_id, $variation_id, $oldMainQty, $oldSubQty, $rate, round($prodDiscount * $oldRatio, 2), $origInvoiceDate, $selectedImeis, $request->warranty_value[$key] ?? null, $request->warranty_unit[$key] ?? null);
+                    $this->createInvoiceItemRow($invoice, $find_unit_id, $product_id, $variation_id, $oldMainQty, $oldSubQty, $rate, round($prodDiscount * $oldRatio, 2), $origInvoiceDate, $selectedImeis, $request->warranty_value[$key] ?? null, $request->warranty_unit[$key] ?? null, $expireDate);
 
                     // Row 2: Incremental portion added on today's edit date
                     $newMainQty = round($reqMainQty * $newRatio, 4);
                     $newSubQty = round($reqSubQty * $newRatio, 4);
-                    $this->createInvoiceItemRow($invoice, $find_unit_id, $product_id, $variation_id, $newMainQty, $newSubQty, $rate, round($prodDiscount * $newRatio, 2), $editDate, null, $request->warranty_value[$key] ?? null, $request->warranty_unit[$key] ?? null);
+                    $this->createInvoiceItemRow($invoice, $find_unit_id, $product_id, $variation_id, $newMainQty, $newSubQty, $rate, round($prodDiscount * $newRatio, 2), $editDate, null, $request->warranty_value[$key] ?? null, $request->warranty_unit[$key] ?? null, $expireDate);
                 } else {
                     $itemDate = $origInvoiceDate ?: $editDate;
-                    $this->createInvoiceItemRow($invoice, $find_unit_id, $product_id, $variation_id, $reqMainQty, $reqSubQty, $rate, $prodDiscount, $itemDate, $selectedImeis, $request->warranty_value[$key] ?? null, $request->warranty_unit[$key] ?? null);
+                    $this->createInvoiceItemRow($invoice, $find_unit_id, $product_id, $variation_id, $reqMainQty, $reqSubQty, $rate, $prodDiscount, $itemDate, $selectedImeis, $request->warranty_value[$key] ?? null, $request->warranty_unit[$key] ?? null, $expireDate);
                 }
 
                 if (!empty($selectedImeis)) {
@@ -2031,7 +2053,7 @@ class InvoiceController extends Controller
                     } else {
                         $oldQty = ($oldItem->main_qty * ($product->unit->related_value ?? 1)) + ($oldItem->sub_qty ?? 0);
                     }
-                    restoreToFIFO($product->id, $oldQty, $variationId, $invoice->branch_id);
+                    restoreToFIFO($product->id, $oldQty, $variationId, $invoice->branch_id, $oldItem->expire_date);
                 }
                 $oldItem->delete();
             }
@@ -2049,6 +2071,7 @@ class InvoiceController extends Controller
             foreach ($productIds as $key => $productId) {
                 $find_unit_id = Product::where('id', $productId)->first();
                 $variationId = $request->variation[$key] ?? null;
+                $expireDate = $request->expire_date[$key] ?? null;
 
                 $reqMainQty = (float)($request->main_qty[$key] ?? 1);
                 $reqSubQty = (float)($request->sub_qty[$key] ?? 0);
@@ -2064,15 +2087,15 @@ class InvoiceController extends Controller
                     // Row 1: Exchange base portion credited to original invoice date
                     $oldMainQty = round($reqMainQty * $oldRatio, 4);
                     $oldSubQty = round($reqSubQty * $oldRatio, 4);
-                    $this->createInvoiceItemRow($invoice, $find_unit_id, $productId, $variationId, $oldMainQty, $oldSubQty, $rate, round($prodDiscount * $oldRatio, 2), $origInvoiceDate, $selectedImeis);
+                    $this->createInvoiceItemRow($invoice, $find_unit_id, $productId, $variationId, $oldMainQty, $oldSubQty, $rate, round($prodDiscount * $oldRatio, 2), $origInvoiceDate, $selectedImeis, null, null, $expireDate);
 
                     // Row 2: Incremental portion added on today's edit date
                     $newMainQty = round($reqMainQty * $newRatio, 4);
                     $newSubQty = round($reqSubQty * $newRatio, 4);
-                    $this->createInvoiceItemRow($invoice, $find_unit_id, $productId, $variationId, $newMainQty, $newSubQty, $rate, round($prodDiscount * $newRatio, 2), $today, null);
+                    $this->createInvoiceItemRow($invoice, $find_unit_id, $productId, $variationId, $newMainQty, $newSubQty, $rate, round($prodDiscount * $newRatio, 2), $today, null, null, null, $expireDate);
                 } else {
                     $itemDate = $origInvoiceDate ?: $today;
-                    $this->createInvoiceItemRow($invoice, $find_unit_id, $productId, $variationId, $reqMainQty, $reqSubQty, $rate, $prodDiscount, $itemDate, $selectedImeis);
+                    $this->createInvoiceItemRow($invoice, $find_unit_id, $productId, $variationId, $reqMainQty, $reqSubQty, $rate, $prodDiscount, $itemDate, $selectedImeis, null, null, $expireDate);
                 }
 
                 // Mark IMEI as sold
@@ -2299,7 +2322,8 @@ class InvoiceController extends Controller
                         $product->id,
                         $qty,
                         $item->product_variation_id,
-                        $invoice->branch_id
+                        $invoice->branch_id,
+                        $item->expire_date
                     );
                 }
 
@@ -2797,7 +2821,7 @@ class InvoiceController extends Controller
         ]);
     }
 
-    private function createInvoiceItemRow($invoice, $find_unit_id, $product_id, $variation_id, $mainQty, $subQty, $rateVal, $discountVal, $itemDate, $selectedImeis = null, $warrantyVal = null, $warrantyUnit = null)
+    private function createInvoiceItemRow($invoice, $find_unit_id, $product_id, $variation_id, $mainQty, $subQty, $rateVal, $discountVal, $itemDate, $selectedImeis = null, $warrantyVal = null, $warrantyUnit = null, $expireDate = null)
     {
         $invoice_item = new InvoiceItem();
         $invoice_item->invoice_id = $invoice->id;
@@ -2805,6 +2829,7 @@ class InvoiceController extends Controller
         $invoice_item->rate = $rateVal;
         $invoice_item->product_discount = $discountVal ?? 0.00;
         $invoice_item->product_variation_id = $variation_id;
+        $invoice_item->expire_date = !empty($expireDate) ? $expireDate : null;
         $invoice_item->warranty_value = $warrantyVal;
         $invoice_item->warranty_unit = $warrantyUnit;
         $invoice_item->branch_id = $invoice->branch_id;
@@ -2834,7 +2859,7 @@ class InvoiceController extends Controller
             $sub = (float)($subQty ?? 0);
             $saleQty = $main + $sub;
 
-            $invoice_item->pur_subtotal = calculateUnitPriceUsingFIFO($product_id, $saleQty, $variation_id, $invoice->branch_id);
+            $invoice_item->pur_subtotal = calculateUnitPriceUsingFIFO($product_id, $saleQty, $variation_id, $invoice->branch_id, $invoice_item->expire_date);
         } else {
             $invoice_item->pur_subtotal = ($find_unit_id->purchase_price ?? 0.00) * $mainQty;
         }

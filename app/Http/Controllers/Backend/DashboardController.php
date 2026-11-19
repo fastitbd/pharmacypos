@@ -30,8 +30,7 @@ class DashboardController extends Controller
             if ($filterBranchId) {
                 $data['total_pur_due'] = Purchase::where('branch_id', $filterBranchId)->sum('total_due');
                 $total_pur = Purchase::where('branch_id', $filterBranchId)->sum('total_amount');
-                $productIds = BranchProduct::where('branch_id', $filterBranchId)->pluck('product_id');
-                $data['total_product'] = Product::whereIn('id', $productIds)->count();
+                $data['total_product'] = BranchProduct::where('branch_id', $filterBranchId)->count();
                 $data['total_sale_due'] = Invoice::getFakeSum(Invoice::where('branch_id', $filterBranchId), 'total_due');
                 $total_inv = Invoice::getFakeSum(Invoice::where('branch_id', $filterBranchId), 'total_amount');
                 $data['total_customer'] = Customer::where('branch_id', $filterBranchId)->count();
@@ -39,7 +38,6 @@ class DashboardController extends Controller
                 $data['inv_due'] = Invoice::getFakeSum(Invoice::where('branch_id', $filterBranchId)->where('date', date('Y-m-d')), 'total_due');
                 $saleCost = InvoiceItem::getFakeSum(InvoiceItem::where('branch_id', $filterBranchId), 'inv_subtotal');
                 $purchaseCost = InvoiceItem::getFakeSum(InvoiceItem::where('branch_id', $filterBranchId), 'pur_subtotal');
-                $returns = ReturnItem::where('branch_id', $filterBranchId)->get();
                 $discount = Invoice::getFakeSum(Invoice::where('branch_id', $filterBranchId), 'discount_amount');
                 $returnDis = ReturnTbl::where('branch_id', $filterBranchId)->sum('discount_amount');
                 $returnAmu = ReturnTbl::where('branch_id', $filterBranchId)->sum('total_return');
@@ -56,7 +54,6 @@ class DashboardController extends Controller
                 $data['inv_due'] = Invoice::getFakeSum(Invoice::where('date', date('Y-m-d')), 'total_due');
                 $saleCost = InvoiceItem::getFakeSum(InvoiceItem::query(), 'inv_subtotal');
                 $purchaseCost = InvoiceItem::getFakeSum(InvoiceItem::query(), 'pur_subtotal');
-                $returns = ReturnItem::get();
                 $returnAmu = ReturnTbl::sum('total_return');
                 $discount = Invoice::getFakeSum(Invoice::query(), 'discount_amount');
                 $returnDis = ReturnTbl::sum('discount_amount');
@@ -65,8 +62,7 @@ class DashboardController extends Controller
         } else {
             $data['total_pur_due'] = Purchase::where('branch_id', $userBranchId)->sum('total_due');
             $total_pur = Purchase::where('branch_id', $userBranchId)->sum('total_amount');
-            $productIds = BranchProduct::where('branch_id', $userBranchId)->pluck('product_id');
-            $data['total_product'] = Product::whereIn('id', $productIds)->count();
+            $data['total_product'] = BranchProduct::where('branch_id', $userBranchId)->count();
             $data['total_sale_due'] = Invoice::getFakeSum(Invoice::where('branch_id', $userBranchId), 'total_due');
             $total_inv = Invoice::getFakeSum(Invoice::where('branch_id', $userBranchId), 'total_amount');
             $data['total_customer'] = Customer::where('branch_id', $userBranchId)->count();
@@ -74,7 +70,6 @@ class DashboardController extends Controller
             $data['inv_due'] = Invoice::getFakeSum(Invoice::where('branch_id', $userBranchId)->where('date', date('Y-m-d')), 'total_due');
             $saleCost = InvoiceItem::getFakeSum(InvoiceItem::where('branch_id', $userBranchId), 'inv_subtotal');
             $purchaseCost = InvoiceItem::getFakeSum(InvoiceItem::where('branch_id', $userBranchId), 'pur_subtotal');
-            $returns = ReturnItem::where('branch_id', $userBranchId)->get();
             $discount = Invoice::getFakeSum(Invoice::where('branch_id', $userBranchId), 'discount_amount');
             $returnDis = ReturnTbl::where('branch_id', $userBranchId)->sum('discount_amount');
             $returnAmu = ReturnTbl::where('branch_id', $userBranchId)->sum('total_return');
@@ -98,25 +93,39 @@ class DashboardController extends Controller
         $profit = $totalProfit - $dis;
         $sale_amu = $total_inv - $profit;
         $branchIdForStock = ($userBranchId == 1) ? $filterBranchId : $userBranchId;
+
+        $purchasedProductQuery = \App\Models\PurchaseItem::query();
         if ($branchIdForStock) {
-            $productIds = BranchProduct::where('branch_id', $branchIdForStock)->pluck('product_id');
-            $stockProducts = Product::whereIn('id', $productIds)->where('is_service', 0)->with('unit')->get();
-        } else {
-            $stockProducts = Product::where('is_service', 0)->with('unit')->get();
+            $purchasedProductQuery->where('branch_id', $branchIdForStock);
         }
+        $stockProductIds = $purchasedProductQuery->where('stock_qty', '>', 0)
+            ->distinct()
+            ->pluck('product_id')
+            ->filter()
+            ->unique();
 
         $avail_stock = 0;
         $avail_stock_sale = 0;
-        foreach ($stockProducts as $product) {
-            $fakeStockQty = product_fake_stock_val($product, $branchIdForStock);
-            $factor = ($product->unit && $product->unit->related_value) ? (float)$product->unit->related_value : 1;
-            if ($factor <= 0) $factor = 1;
 
-            $unitCost = product_purchase_unit_cost($product, $branchIdForStock);
-            $sellingPriceUnit = ((float) $product->selling_price) / $factor;
+        if ($stockProductIds->isNotEmpty()) {
+            $stockProducts = Product::whereIn('id', $stockProductIds)
+                ->where('is_service', 0)
+                ->with('unit')
+                ->get();
 
-            $avail_stock += $fakeStockQty * $unitCost;
-            $avail_stock_sale += $fakeStockQty * $sellingPriceUnit;
+            foreach ($stockProducts as $product) {
+                $fakeStockQty = product_fake_stock_val($product, $branchIdForStock);
+                if ($fakeStockQty <= 0) continue;
+
+                $factor = ($product->unit && $product->unit->related_value) ? (float)$product->unit->related_value : 1;
+                if ($factor <= 0) $factor = 1;
+
+                $unitCost = product_purchase_unit_cost($product, $branchIdForStock);
+                $sellingPriceUnit = ((float) $product->selling_price) / $factor;
+
+                $avail_stock += $fakeStockQty * $unitCost;
+                $avail_stock_sale += $fakeStockQty * $sellingPriceUnit;
+            }
         }
 
         // When no sales have occurred yet, sync stock purchase valuation to total purchase amount

@@ -18,6 +18,7 @@ use App\Models\SerialNumber;
 use Illuminate\Http\Request;
 use App\Models\BranchProduct;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Picqer\Barcode\BarcodeGeneratorSVG;
 
@@ -428,6 +429,30 @@ class OthersController extends Controller
         return collect($resultList);
     }
 
+    private function getProductExpireBatches($productId, $branchId = null)
+    {
+        $query = PurchaseItem::where('product_id', $productId)
+            ->whereNotNull('expire_date')
+            ->where('expire_date', '!=', '')
+            ->where('stock_qty', '>', 0);
+
+        if ($branchId) {
+            $query->where('branch_id', $branchId);
+        }
+
+        return $query->select('expire_date', DB::raw('SUM(stock_qty) as available_stock'))
+            ->groupBy('expire_date')
+            ->orderBy('expire_date', 'asc')
+            ->get()
+            ->map(function ($item) {
+                return [
+                    'expire_date' => $item->expire_date,
+                    'formatted_date' => date('d M, Y', strtotime($item->expire_date)),
+                    'available_stock' => (float) $item->available_stock,
+                ];
+            });
+    }
+
     public function productExchange(Request $request)
     {
         $query = request('req');
@@ -455,6 +480,7 @@ class OthersController extends Controller
         $data['brand'] = Brand::find($data['product']->brand_id);
 
         $data['imeis'] = $this->getProductImeis($my_id, $activeBranchId);
+        $data['expire_batches'] = $this->getProductExpireBatches($my_id, $activeBranchId);
 
         // Warranty default: Product's set warranty first, or latest purchase warranty
         if (!empty($data['product']->warranty_value)) {
@@ -530,6 +556,7 @@ class OthersController extends Controller
             $data['variations'] = [];
         }
         $data['imeis'] = $this->getProductImeis($my_id, $activeBranchId);
+        $data['expire_batches'] = $this->getProductExpireBatches($my_id, $activeBranchId);
 
         // Warranty default: Product's set warranty first, or latest purchase warranty
         if (!empty($data['product']->warranty_value)) {
@@ -623,6 +650,7 @@ class OthersController extends Controller
         $data['stock_qty'] = product_stock_check($data['product'], $activeBranchId);
         $data['brand'] = Brand::find($data['product']->brand_id);
         $data['imeis'] = $this->getProductImeis($my_id, $activeBranchId);
+        $data['expire_batches'] = $this->getProductExpireBatches($my_id, $activeBranchId);
         
         // Warranty default: Product's set warranty first, or latest purchase warranty
         if (!empty($data['product']->warranty_value)) {
@@ -671,6 +699,7 @@ class OthersController extends Controller
                 $data['variations'] = [];
             }
             $data['imeis'] = $this->getProductImeis($my_id, $activeBranchId);
+        $data['expire_batches'] = $this->getProductExpireBatches($my_id, $activeBranchId);
     
             // Warranty default: Product's set warranty first, or latest purchase warranty
             if (!empty($data['product']->warranty_value)) {

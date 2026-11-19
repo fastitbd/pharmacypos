@@ -178,6 +178,8 @@ class ReturnSaleController extends Controller
                 ========================
                 */
 
+                    $invoiceItem = InvoiceItem::find($item_id);
+
                     $returnItem = new ReturnItem();
                     $returnItem->date = $returnDate;
                     $returnItem->return_id = $return->id;
@@ -185,6 +187,7 @@ class ReturnSaleController extends Controller
                     $returnItem->invoice_id = $request->invoice_id;
                     $returnItem->product_id = $productId;
                     $returnItem->product_variation_id = $variationId;
+                    $returnItem->expire_date = $invoiceItem->expire_date ?? ($request->expire_date[$key] ?? null);
                     $returnItem->rate = $request->new_rate[$key];
                     $returnItem->purchase_price = $request->purchase_price[$key];
                     $returnItem->main_qty = $mainQty;
@@ -262,7 +265,7 @@ class ReturnSaleController extends Controller
                 STOCK RESTORE (LIFO)
                 ========================
                 */
-                    restoreToFIFO($productId, $qty, $variationId, $branch_id);
+                    restoreToFIFO($productId, $qty, $variationId, $branch_id, $returnItem->expire_date);
                 }
 
                 /*
@@ -451,7 +454,7 @@ class ReturnSaleController extends Controller
                                 $main = $rtnItem->main_qty * $product->unit->related_value;
                                 $qty = $main + $rtnItem->sub_qty;
                             }
-                            reduceStockFIFO($rtnItem->product_id, $qty, $rtnItem->product_variation_id, $rtnItem->branch_id);
+                            reduceStockFIFO($rtnItem->product_id, $qty, $rtnItem->product_variation_id, $rtnItem->branch_id, $rtnItem->expire_date);
                         }
                     }
                 }

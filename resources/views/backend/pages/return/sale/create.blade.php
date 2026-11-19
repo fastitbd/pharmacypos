@@ -142,10 +142,17 @@
                                                         @if ($item->product_variation_id != null)
                                                             ({{ $item->product_variation?->size?->size }}-{{ $item->product_variation?->color?->color }})
                                                         @endif
+                                                        @if (!empty($item->expire_date))
+                                                            <br><span class="badge badge-warning text-dark font-weight-bold" style="font-size: 11px;">
+                                                                <i class="fa fa-calendar-alt"></i> Exp: {{ date('d M, Y', strtotime($item->expire_date)) }}
+                                                            </span>
+                                                        @endif
                                                         <input type="hidden" value="{{ $item->product?->id }}"
                                                             name="product_id[]" />
                                                         <input type="hidden" value="{{ $item->product_variation_id }}"
                                                             name="product_variation_id[]" />
+                                                        <input type="hidden" value="{{ $item->expire_date }}"
+                                                            name="expire_date[]" />
                                                         @if (env('APP_IMEI') == 'yes' && $item->product?->imei == 1)
                                                             <div class="mt-2 text-left">
                                                                 <small class="text-danger font-weight-bold">{{ __('Select IMEIs to Return') }}</small>

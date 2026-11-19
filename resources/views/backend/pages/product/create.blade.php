@@ -23,6 +23,43 @@
                         <form id="productCreateForm" class="row g-3 needs-validation" method="POST" action="{{ route('product.store') }}"
                             enctype="multipart/form-data" novalidate>
                             @csrf
+                            {{-- Product Type --}}
+                            <div class="mt-2 col-md-12">
+                                <label class="form-label fw-bold">{{ __('Product Type *') }}</label>
+                                <div class="d-flex align-items-center mt-1" style="gap: 25px;">
+                                    <div class="custom-control custom-radio">
+                                        <input type="radio" id="type_general" name="product_type" value="general" class="custom-control-input product_type_radio" {{ old('product_type', 'general') == 'general' ? 'checked' : '' }}>
+                                        <label class="custom-control-label fw-bold text-dark cursor-pointer" for="type_general">{{ __('General Product') }}</label>
+                                    </div>
+                                    <div class="custom-control custom-radio">
+                                        <input type="radio" id="type_medicine" name="product_type" value="medicine" class="custom-control-input product_type_radio" {{ old('product_type') == 'medicine' ? 'checked' : '' }}>
+                                        <label class="custom-control-label fw-bold text-dark cursor-pointer" for="type_medicine">{{ __('Medicine Product') }}</label>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {{-- Medicine specific fields --}}
+                            <div class="mt-2 col-md-3 medicine-field">
+                                <label for="generic_name" class="form-label fw-bold">{{ __('Generic Name') }}</label>
+                                <input type="text" class="form-control" name="generic_name" id="generic_name" value="{{ old('generic_name') }}"
+                                    placeholder="{{ __('Generic Name') }}" disabled>
+                            </div>
+                            <div class="mt-2 col-md-3 medicine-field">
+                                <label for="company" class="form-label fw-bold">{{ __('Company') }}</label>
+                                <input type="text" class="form-control" name="company" id="company" value="{{ old('company') }}"
+                                    placeholder="{{ __('Company Name') }}" disabled>
+                            </div>
+                            <div class="mt-2 col-md-3 medicine-field">
+                                <label for="strength" class="form-label fw-bold">{{ __('Strength') }}</label>
+                                <input type="text" class="form-control" name="strength" id="strength" value="{{ old('strength') }}"
+                                    placeholder="{{ __('e.g. 500mg') }}" disabled>
+                            </div>
+                            <div class="mt-2 col-md-3 medicine-field">
+                                <label for="dosage_form" class="form-label fw-bold">{{ __('Dosage Form') }}</label>
+                                <input type="text" class="form-control" name="dosage_form" id="dosage_form" value="{{ old('dosage_form') }}"
+                                    placeholder="{{ __('e.g. Tablet, Syrup') }}" disabled>
+                            </div>
+
                             {{-- Product name --}}
                             <div class="mt-2 col-md-6">
                                 <label for="name" class="form-label fw-bold">{{ __('Name *') }}</label>
@@ -205,7 +242,7 @@
                                     {{ __('Sale price cannot be below purchase price') }}
                                 </div>
                             </div>
-                            {{-- status --}}
+                            {{-- status & has expire date --}}
                             <div class="col-md-6 mt-2" style="margin-right: -6px">
                                 <label for="status" class="form-label fw-bold">{{ __('Status *') }}</label>
                                 <select class="select2" name="status">
@@ -213,6 +250,14 @@
                                     <option value="0">{{ __('Deactive') }}</option>
                                 </select>
                                 <div class="errors">{{ $errors->has('status') ? $errors->first('status') : '' }}</div>
+                            </div>
+                            <div class="col-md-6 mt-2 d-flex align-items-center">
+                                <div class="custom-control custom-checkbox mt-4">
+                                    <input type="checkbox" class="custom-control-input" id="has_expire_date" name="has_expire_date" value="1" {{ old('has_expire_date') ? 'checked' : '' }}>
+                                    <label class="custom-control-label fw-bold text-dark cursor-pointer" for="has_expire_date" style="font-size: 14px;">
+                                        {{ __('Has Expire Date') }}
+                                    </label>
+                                </div>
                             </div>
                             @if (env('APP_IMEI') == 'yes')
                             <div class="mt-2 col-md-6  ">
@@ -917,6 +962,29 @@
                     }
                 }
             });
+
+            // Toggle medicine specific fields
+            function toggleMedicineFields() {
+                let isMedicine = $('#type_medicine').is(':checked');
+                if (isMedicine) {
+                    $('.medicine-field input').prop('disabled', false).removeClass('bg-light');
+                    if (!$('#has_expire_date').data('user-touched')) {
+                        $('#has_expire_date').prop('checked', true);
+                    }
+                } else {
+                    $('.medicine-field input').prop('disabled', true).addClass('bg-light');
+                }
+            }
+
+            $(document).on('change', '.product_type_radio', function() {
+                toggleMedicineFields();
+            });
+
+            $('#has_expire_date').on('change', function() {
+                $(this).data('user-touched', true);
+            });
+
+            toggleMedicineFields();
         });
     </script>
 @endpush

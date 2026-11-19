@@ -25,3 +25,10 @@ Route::get('/categories', [ApiController::class, 'categories']);
 Route::get('/brands', [ApiController::class, 'brands']);
 Route::get('/customers', [ApiController::class, 'customers']);
 Route::get('/suppliers', [ApiController::class, 'suppliers']);
+
+// Pharmacy specific API endpoints
+Route::prefix('pharmacy')->group(function () {
+    Route::get('/products', [ApiController::class, 'pharmacyProducts']);
+    Route::get('/products/{id}', [ApiController::class, 'pharmacyProductDetails']);
+    Route::post('/import-db', [ApiController::class, 'importPharmacyDatabase']);
+});

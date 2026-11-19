@@ -27,7 +27,7 @@
                     @php
                         $brands = App\Models\Brand::get();
                         $categories = App\Models\Category::get();
-                        $produc = App\Models\Product::get();
+                        $produc = !empty($product_id) ? App\Models\Product::where("id", $product_id)->get() : collect([]);
                     @endphp
                     <form action="{{ route('report.stock') }}" method="GET">
                         <div class="row h-hide">

@@ -173,7 +173,7 @@
                     <form action="{{ route('invoice.online.sale') }}" method="GET">
                         @php
                             $customers = App\Models\Customer::get();
-                            $products = App\Models\Product::get();
+                            $products = !empty($product_id) ? App\Models\Product::where("id", $product_id)->get() : collect([]);
                         @endphp
                         <div class="row h-hide align-items-end mb-2">
                             <div class="col-xl-2 col-lg-3 col-md-4 col-sm-6 col-12 mb-2">

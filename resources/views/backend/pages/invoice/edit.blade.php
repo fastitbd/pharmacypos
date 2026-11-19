@@ -280,6 +280,41 @@
                                                         @else
                                                             <input type="hidden" name="variation_id[]">
                                                         @endif
+                                                        @php
+                                                            $batches = \App\Models\PurchaseItem::where('product_id', $item->product_id)
+                                                                ->where('branch_id', $invoice->branch_id)
+                                                                ->whereNotNull('expire_date')
+                                                                ->where('expire_date', '!=', '')
+                                                                ->select('expire_date', \DB::raw('SUM(stock_qty) as available_stock'))
+                                                                ->groupBy('expire_date')
+                                                                ->orderBy('expire_date', 'asc')
+                                                                ->get();
+                                                        @endphp
+                                                        @if(($item->product->has_expire_date == 1) || count($batches) > 0 || !empty($item->expire_date))
+                                                            <div class="mt-1">
+                                                                <select name="expire_date[]" class="form-control form-control-sm expire-date-select" style="font-size: 11px;">
+                                                                    <option value="">{{ __('No Expire Date') }}</option>
+                                                                    @foreach($batches as $b)
+                                                                        @php
+                                                                            $bStock = (float) $b->available_stock;
+                                                                            if ($item->expire_date == $b->expire_date) {
+                                                                                $bStock += $sold_qty_sub;
+                                                                            }
+                                                                        @endphp
+                                                                        <option value="{{ $b->expire_date }}" data-stock="{{ $bStock }}" {{ $item->expire_date == $b->expire_date ? 'selected' : '' }}>
+                                                                            📅 {{ date('d M, Y', strtotime($b->expire_date)) }} ({{ $bStock }} pcs)
+                                                                        </option>
+                                                                    @endforeach
+                                                                    @if(!empty($item->expire_date) && !$batches->contains('expire_date', $item->expire_date))
+                                                                        <option value="{{ $item->expire_date }}" data-stock="{{ $sold_qty_sub }}" selected>
+                                                                            📅 {{ date('d M, Y', strtotime($item->expire_date)) }} ({{ $sold_qty_sub }} pcs)
+                                                                        </option>
+                                                                    @endif
+                                                                </select>
+                                                            </div>
+                                                        @else
+                                                            <input type="hidden" name="expire_date[]" value="{{ $item->expire_date }}">
+                                                        @endif
                                                         @if(env('APP_IMEI') == 'yes')
                                                             @if($item->product->imei == 1)
                                                                 <div class="mt-2 text-left">
@@ -841,6 +876,26 @@
                 imei_data = `<input type="hidden" name="imei[]">`;
             @endif
 
+            var expire_data = '';
+            var hasExpire = (data.product.has_expire_date == 1) || (data.expire_batches && data.expire_batches.length > 0);
+            if (hasExpire) {
+                var optionsHtml = '<option value="">{{ __("No Expire Date") }}</option>';
+                if (data.expire_batches && data.expire_batches.length > 0) {
+                    $.each(data.expire_batches, function(idx, b) {
+                        optionsHtml += `<option value="${b.expire_date}" data-stock="${b.available_stock}">📅 ${b.formatted_date} (${b.available_stock} pcs)</option>`;
+                    });
+                }
+                expire_data = `
+                    <div class="mt-1">
+                        <select name="expire_date[]" class="form-control form-control-sm expire-date-select" style="font-size: 11px;">
+                            ${optionsHtml}
+                        </select>
+                    </div>
+                `;
+            } else {
+                expire_data = `<input type="hidden" name="expire_date[]" value="">`;
+            }
+
             // ${data.product.name + " - Stock (" + data.stock_qty +")"}
             let dom = `
                 <tr id="tbody_tr">
@@ -848,6 +903,7 @@
                     <td style="min-width: 100px;">
                     ${data.product.name} ${data.product.barcode ? " - " + data.product.barcode : ""}
                     <div class="mt-1">${variation_data}</div>
+                    ${expire_data}
                     ${imei_data}
                     <input type="hidden" class="name" value="${name.replace(/[&\/\\#,+()$~%.'":*?<>{}]/g, '')}" name="name[]" />
                     <input type="hidden" value="${data.product.id}" name="product_id[]" />

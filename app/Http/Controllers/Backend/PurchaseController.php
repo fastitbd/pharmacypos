@@ -41,14 +41,14 @@ class PurchaseController extends Controller
         $data['suppliers'] = Supplier::orderBy('name', 'asc')->get();
 
         if ($branchId) {
-            $productIds = BranchProduct::where('branch_id', $branchId)->pluck('product_id');
             $categoryIds = BranchCategory::where('branch_id', $branchId)->pluck('category_id');
-            $data['allProduct'] = Product::whereIn('id', $productIds)->orderBy('name', 'asc')->get();
             $data['allCategory'] = Category::whereIn('id', $categoryIds)->orderBy('name', 'asc')->get();
         } else {
-            $data['allProduct'] = Product::orderBy('name', 'asc')->get();
             $data['allCategory'] = Category::orderBy('name', 'asc')->get();
         }
+
+        $data['selectedProduct'] = $request->filled('product_id') ? Product::find($request->product_id) : null;
+        $data['allProduct'] = $data['selectedProduct'] ? collect([$data['selectedProduct']]) : collect([]);
 
         $query = Purchase::with('supplier', 'user', 'purchaseItems.product')
             ->when($branchId, function ($q) use ($branchId) {
@@ -312,6 +312,7 @@ class PurchaseController extends Controller
 
                     $purchase_item = new PurchaseItem();
                     $purchase_item->date = $request->date;
+                    $purchase_item->expire_date = $request->new_expire_date[$key] ?? null;
 
                     $find_unit_id = Product::where('id', $product_id)->first();
 
@@ -676,6 +677,7 @@ class PurchaseController extends Controller
 
                 $purchase_item = new PurchaseItem();
                 $purchase_item->date = $request->date;
+                $purchase_item->expire_date = $request->new_expire_date[$key] ?? null;
                 $purchase_item->branch_id = $purchase->branch_id;
                 $purchase_item->purchase_id = $purchase->id;
                 $purchase_item->product_id = $product_id;

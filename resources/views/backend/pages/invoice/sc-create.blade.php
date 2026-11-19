@@ -5475,7 +5475,9 @@
                     let currentSub = parseFloat(subQtyHidden.val()) || 0;
                     let newMain = currentMain + 1;
                     let newTotalSub = (newMain * related_by) + currentSub;
-                    let maxAvailable = (varStock !== null) ? varStock * related_by : stockQty * related_by;
+                    let selectedBatchOpt = existingRow.find('.expire-date-select option:selected');
+                    let batchStock = selectedBatchOpt.length > 0 ? parseFloat(selectedBatchOpt.data('stock')) : null;
+                    let maxAvailable = (batchStock !== null && !isNaN(batchStock)) ? (batchStock * related_by) : ((varStock !== null) ? varStock * related_by : stockQty * related_by);
 
                     if (data.product.is_service == 0 && newTotalSub > maxAvailable) {
                         iziToast.error({
@@ -5498,7 +5500,9 @@
                     let newQty = currentQty + 1;
 
                     // stock check
-                    let maxAvailable = (varStock !== null) ? varStock : stockQty;
+                    let selectedBatchOpt = existingRow.find('.expire-date-select option:selected');
+                    let batchStock = selectedBatchOpt.length > 0 ? parseFloat(selectedBatchOpt.data('stock')) : null;
+                    let maxAvailable = (batchStock !== null && !isNaN(batchStock)) ? batchStock : ((varStock !== null) ? varStock : stockQty);
                     if (data.product.is_service == 0 && newQty > maxAvailable) {
                         iziToast.error({
                             title: "{{ __('Out of Stock!') }}",
@@ -6404,6 +6408,47 @@
                 `;
             }
 
+            let expire_data = '';
+            let hasExpire = (data.product.has_expire_date == 1) || (data.expire_batches && data.expire_batches.length > 0);
+            if (hasExpire) {
+                let optionsHtml = '';
+                let defaultBatchStock = null;
+                if (data.expire_batches && data.expire_batches.length > 0) {
+                    $.each(data.expire_batches, function(idx, b) {
+                        let isOut = parseFloat(b.available_stock) <= 0;
+                        let dis = (isOut && !skipStockCheck) ? 'disabled' : '';
+                        let isSelected = false;
+                        if (defaultBatchStock === null && !isOut) {
+                            isSelected = true;
+                            defaultBatchStock = parseFloat(b.available_stock);
+                        }
+                        optionsHtml += `<option value="${b.expire_date}" data-stock="${b.available_stock}" ${isSelected ? 'selected' : ''} ${dis}>
+                            📅 ${b.formatted_date} (${b.available_stock} in stock)${isOut ? ' - Out' : ''}
+                        </option>`;
+                    });
+                    if (defaultBatchStock === null) {
+                        defaultBatchStock = parseFloat(data.expire_batches[0].available_stock) || 0;
+                    }
+                } else {
+                    optionsHtml = `<option value="" data-stock="0">📅 No active expire batch (0 in stock)</option>`;
+                    defaultBatchStock = 0;
+                }
+
+                if (defaultBatchStock !== null && (!data.variations || data.variations.length === 0)) {
+                    displayStock = defaultBatchStock;
+                }
+
+                expire_data = `
+                    <div class="mt-1 expire-batch-wrapper">
+                        <select name="expire_date[]" class="form-control form-control-sm expire-date-select" style="font-size: 11px; height: 26px; padding: 1px 4px; font-weight: 500; border-color: #17a2b8;">
+                            ${optionsHtml}
+                        </select>
+                    </div>
+                `;
+            } else {
+                expire_data = `<input type="hidden" name="expire_date[]" value="">`;
+            }
+
             if (data.product.is_service == 0) {
                 if (typeof weight !== "undefined" && weight !== null && weight !== "" && !isNaN(weight)) {
                     let gram = parseFloat(weight);
@@ -6531,6 +6576,7 @@
                             <span class="font-weight-bold">${data.product.name}</span>
                             ${data.product.is_service == 1 ? `<div class="text-info small mt-1 fw-bold">Cost: ${data.product.purchase_price || '0.00'} | Sale: ${data.product.selling_price || '0.00'}</div>` : ''}
                             <div class="mt-1">${variation_data}</div>
+                            ${expire_data}
                             @if (env('APP_SC') == 'yes')
                             ${data.product.barcode ? `<div class="small text-muted font-monospace"><i class="fa fa-barcode mr-1"></i>${data.product.barcode}</div>` : ''}
                             @endif
@@ -6633,6 +6679,10 @@
                     let selectedOption = variation_select.find('option:selected');
                     let varStock = parseFloat(selectedOption.attr('stock')) || 0;
                     stock_sub = varStock * related_by;
+                } else if (row.find('.expire-date-select').length > 0 && row.find('.expire-date-select').val()) {
+                    let selectedBatch = row.find('.expire-date-select option:selected');
+                    let bStock = parseFloat(selectedBatch.data('stock'));
+                    stock_sub = !isNaN(bStock) ? (bStock * related_by) : 0;
                 } else {
                     let stockText = row.find('.quantity-input').attr('data-stock');
                     let stock_qty = parseStockQty(stockText, true, related_by);
@@ -6754,6 +6804,10 @@
                 let selectedOption = variation_select.find('option:selected');
                 let variationStock = parseFloat(selectedOption.attr('stock')) || 0;
                 stock = has_sub_unit === "true" ? variationStock * related_by : variationStock;
+            } else if (row.find('.expire-date-select').length > 0 && row.find('.expire-date-select').val()) {
+                let selectedBatch = row.find('.expire-date-select option:selected');
+                let bStock = parseFloat(selectedBatch.data('stock'));
+                stock = !isNaN(bStock) ? (has_sub_unit === "true" ? bStock * related_by : bStock) : 0;
             } else {
                 // fallback to product stock
                 let stockText = $(this).attr('data-stock');
@@ -6857,6 +6911,34 @@
             }
         });
 
+        $(document).on('change', '.expire-date-select', function() {
+            let row = $(this).closest('tr');
+            let selectedOpt = $(this).find('option:selected');
+            let batchStock = parseFloat(selectedOpt.data('stock'));
+            if (isNaN(batchStock)) batchStock = 0;
+            let qtyInput = row.find('.quantity-input');
+            let stockLabel = row.find('.stock-info-label');
+            let has_sub_unit = row.find('.has_sub_unit').val() === 'true';
+
+            qtyInput.attr('data-stock', batchStock);
+            stockLabel.removeClass('text-danger').addClass('text-muted').css('font-weight', 'normal')
+                .html('📦 Batch Stock: ' + batchStock);
+
+            if (batchStock <= 0) {
+                iziToast.error({
+                    title: "{{ __('Out of Stock!') }}",
+                    message: "{{ __('Selected expire batch is out of stock.') }}",
+                    position: "topRight"
+                });
+            }
+
+            if (has_sub_unit && row.find('.main_qty_input').length > 0) {
+                row.find('.main_qty_input').trigger('change');
+            } else if (parseFloat(qtyInput.val()) > 0) {
+                qtyInput.trigger('input');
+            }
+        });
+
         // ========================================
         // ✅ Invoice Form Submit Strict Stock Validation
         // ========================================
@@ -6910,8 +6992,23 @@
                     
                     let stockQtyInMain = parseStockQty(stockText, has_sub_unit, related_by);
                     let stockSub = stockQtyInMain * related_by;
-                    
-                    if (stockQtyInMain <= 0 || totalReqSub > (stockSub + 0.001)) {
+
+                    let expireSelect = row.find('.expire-date-select');
+                    if (expireSelect.length > 0 && expireSelect.val()) {
+                        let selectedBatch = expireSelect.find('option:selected');
+                        let bStock = parseFloat(selectedBatch.data('stock'));
+                        if (!isNaN(bStock)) {
+                            let bStockSub = has_sub_unit ? (bStock * related_by) : bStock;
+                            let checkReq = has_sub_unit ? totalReqSub : (mainQty + subQty);
+                            if (bStock <= 0 || checkReq > (bStockSub + 0.001)) {
+                                hasError = true;
+                                errorMsg = "{{ __('Stock Out Error: Expire batch for ') }}" + name + " {{ __('is out of stock!') }} (" + "{{ __('Available: ') }}" + bStock + ")";
+                                expireSelect.css('border', '2px solid red');
+                                row.find('.quantity-input, .main_qty_input').css('border', '2px solid red').focus();
+                                return false;
+                            }
+                        }
+                    } else if (stockQtyInMain <= 0 || totalReqSub > (stockSub + 0.001)) {
                         hasError = true;
                         errorMsg = "{{ __('Stock Out Error: Product ') }}" + name + " {{ __('is out of stock!') }} (" + "{{ __('Available: ') }}" + (stockText || stockQtyInMain) + ")";
                         row.find('.quantity-input, .main_qty_input').css('border', '2px solid red').focus();

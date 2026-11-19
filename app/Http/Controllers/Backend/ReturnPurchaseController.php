@@ -245,6 +245,7 @@ class ReturnPurchaseController extends Controller
                         $returnItem->product_id = $request->product_id[$i];
                         $returnItem->product_variation_id = $request->product_variation_id[$i];
                         $returnItem->rate = $request->new_rate[$i];
+                        $returnItem->expire_date = $purchase_items->expire_date ?? null;
                         $returnItem->main_qty = $request->main_qty[$i];
                         $returnItem->sub_qty = $request->sub_qty[$i];
                         $returnItem->subtotal = $request->sub_total[$i];

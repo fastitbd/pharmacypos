@@ -348,7 +348,18 @@
                                     @endphp
                                     <tr>
                                         <td class="table_data_style_left">{{ $loop->index + 1 }}</td>
-                                        <td>{{ $data->name }} - {{ $data->barcode }}</td>
+                                        <td>
+                                            {{ $data->name }} - {{ $data->barcode }}
+                                            @if ($data->has_expire_date == 1 || $data->product_type == 'medicine' || ($data->purchaseItems && $data->purchaseItems->whereNotNull('expire_date')->count() > 0))
+                                                <button type="button" class="btn btn-sm btn-outline-info ml-1 btn-expire-details" 
+                                                    data-product-id="{{ $data->id }}" 
+                                                    data-product-name="{{ $data->name }}" 
+                                                    style="padding: 1px 6px; font-size: 11px; border-radius: 4px; border-color: #0dcaf0;" 
+                                                    title="{{ __('Expire Date Details') }}">
+                                                    <i class="feather icon-calendar" style="color: #0dcaf0;"></i>
+                                                </button>
+                                            @endif
+                                        </td>
                                         <td>
                                             <span class="badge badge-secondary cursor-pointer btn-view-category" 
                                                   data-category-name="{{ $data->category->name }}"
@@ -985,6 +996,40 @@
     </div>
     @endif
 
+    <!-- Expire Date Details Modal -->
+    <div class="modal fade" id="viewExpireDateModal" tabindex="-1" role="dialog" aria-labelledby="viewExpireDateModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered" role="document">
+            <div class="modal-content card_style" style="border-radius: 10px; overflow: hidden; box-shadow: 0 10px 25px rgba(0,0,0,0.2);">
+                <div class="modal-header d-flex justify-content-between align-items-center" style="background-color: #ffffff; border-bottom: 1px solid #e2e8f0; padding: 15px 20px;">
+                    <h5 class="modal-title font-weight-bold text-dark" id="viewExpireDateModalLabel" style="font-size: 17px; margin-bottom: 0;">{{ __('Expire Date Details') }}</h5>
+                    <div class="d-flex align-items-center">
+                        <button type="button" class="btn btn-primary btn-sm mr-3 font-weight-bold" id="printExpireDateModal" style="background-color: #2b3990; border-color: #2b3990; padding: 5px 15px; border-radius: 6px;">
+                            <i class="feather icon-printer mr-1"></i> {{ __('Print') }}
+                        </button>
+                        <button type="button" class="close" data-dismiss="modal" aria-label="Close" style="font-size: 24px; line-height: 1; padding: 0; margin: 0; opacity: 0.6;">
+                            <span aria-hidden="true">&times;</span>
+                        </button>
+                    </div>
+                </div>
+                <div class="modal-body text-left p-0" id="expireModalPrintArea">
+                    <div class="table-responsive">
+                        <table class="table table-bordered mb-0" style="width: 100%;">
+                            <thead>
+                                <tr style="background-color: #f8fafc; border-bottom: 2px solid #e2e8f0;">
+                                    <th class="font-weight-bold text-left pl-3" style="color: #334155; font-size: 13px;">{{ __('Expire Date') }}</th>
+                                    <th class="font-weight-bold text-center" style="color: #334155; font-size: 13px;">{{ __('Stock In') }}</th>
+                                    <th class="font-weight-bold text-center pr-3" style="color: #334155; font-size: 13px;">{{ __('Stock Asy') }}</th>
+                                </tr>
+                            </thead>
+                            <tbody id="expireDateTableBody">
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script>
         // $(doucment).ready(function(){
         $('#resetBtn').click(function() {
@@ -1110,5 +1155,62 @@
             });
         });
         @endif
+
+        // Expire Date Details Modal Handler
+        $(document).on('click', '.btn-expire-details', function() {
+            let productId = $(this).data('product-id');
+            let productName = $(this).data('product-name');
+            let branchId = $('input[name="branch_id"]').val() || '';
+
+            $('#viewExpireDateModalLabel').text('{{ __("Expire Date Details") }} - ' + productName);
+            $('#expireDateTableBody').html('<tr><td colspan="3" class="text-center py-4"><i class="fa fa-spinner fa-spin mr-1"></i> {{ __("Loading...") }}</td></tr>');
+            $('#viewExpireDateModal').modal('show');
+
+            $.ajax({
+                url: "{{ url('report/product-expire-details') }}/" + productId,
+                type: 'GET',
+                data: { branch_id: branchId },
+                success: function(res) {
+                    if (res.status === 'success') {
+                        if (res.data.length === 0) {
+                            $('#expireDateTableBody').html('<tr><td colspan="3" class="text-center text-muted py-4">{{ __("No expire date records found for this product.") }}</td></tr>');
+                        } else {
+                            let html = '';
+                            res.data.forEach(function(item) {
+                                html += `
+                                    <tr>
+                                        <td class="text-left pl-3 font-weight-bold" style="font-size: 13px; color: #1e293b;">${item.formatted_date}</td>
+                                        <td class="text-center" style="font-size: 13px; color: #334155;">${item.stock_in}</td>
+                                        <td class="text-center pr-3 font-weight-bold ${parseFloat(item.stock_asy) > 0 ? 'text-success' : 'text-danger'}" style="font-size: 13px;">${item.stock_asy}</td>
+                                    </tr>
+                                `;
+                            });
+                            $('#expireDateTableBody').html(html);
+                        }
+                    }
+                },
+                error: function() {
+                    $('#expireDateTableBody').html('<tr><td colspan="3" class="text-center text-danger py-4">{{ __("Failed to load expire date details.") }}</td></tr>');
+                }
+            });
+        });
+
+        $('#printExpireDateModal').on('click', function() {
+            let printContents = document.getElementById('expireModalPrintArea').innerHTML;
+            let title = document.getElementById('viewExpireDateModalLabel').innerText;
+            let win = window.open('', '', 'height=600,width=800');
+            win.document.write('<html><head><title>' + title + '</title>');
+            win.document.write('<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@4.6.2/dist/css/bootstrap.min.css">');
+            win.document.write('</head><body style="padding: 20px;">');
+            win.document.write('<h4 style="margin-bottom: 20px; font-weight: bold;">' + title + '</h4>');
+            win.document.write(printContents);
+            win.document.write('</body></html>');
+            win.document.close();
+            win.focus();
+            setTimeout(function() {
+                win.print();
+                win.close();
+            }, 500);
+        });
     </script>
 @endsection

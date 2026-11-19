@@ -30,45 +30,69 @@ class ProductController extends Controller
 {
     public function index(Request $request)
     {
-        $userBranchId = auth()->user()->branch_id;
-        $filterBranchId = session('branch_filter_id', auth()->user()->branch_id);
+        $userBranchId = auth()->user() ? auth()->user()->branch_id : 1;
+        $filterBranchId = session('branch_filter_id', $userBranchId);
+        $targetBranchId = ($userBranchId == 1) ? $filterBranchId : $userBranchId;
+
         $data['product_id'] = $request->product_id;
         $data['category_id'] = $request->category_id;
         $data['sub_category_id'] = $request->sub_category_id;
         $data['barcode'] = $request->barcode;
-        $data['subCategories'] = $request->category_id ? SubCategory::where('category_id', $request->category_id)->orderBy('name', 'asc')->get() : SubCategory::orderBy('name', 'asc')->get();
-        $query = Product::with(['brand', 'category', 'subCategory', 'unit.related_unit'])->where('is_service', 0);
 
-        if ($userBranchId == 1) {
-            if ($filterBranchId && empty($request->barcode) && empty($request->product_id)) {
-                $productIds = BranchProduct::where('branch_id', $filterBranchId)->pluck('product_id');
-                $categoryds = BranchCategory::where('branch_id', $filterBranchId)->pluck('category_id');
-                $query->whereIn('id', $productIds);
-                $data['produc'] = Product::whereIn('id', $productIds)->where('is_service', 0)->orderBy('id', 'desc')->paginate(20);
-                $data['categories'] = Category::whereIn('id', $categoryds)->orderBy('id', 'desc')->get();
-            } else {
-                $data['produc'] = Product::where('is_service', 0)->orderBy('id', 'desc')->paginate(20);
-                $data['categories'] = Category::orderBy('id', 'desc')->get();
-            }
+        if (env('APP_SUB_CATEGORY') == 'yes') {
+            $data['subCategories'] = $request->filled('category_id')
+                ? SubCategory::where('category_id', $request->category_id)->orderBy('name', 'asc')->get(['id', 'name'])
+                : SubCategory::orderBy('name', 'asc')->get(['id', 'name']);
         } else {
-            $categoryds = BranchCategory::where('branch_id', $userBranchId)->pluck('category_id');
-            $productIds = BranchProduct::where('branch_id', $userBranchId)->pluck('product_id');
-            $data['produc'] = Product::whereIn('id', $productIds)->where('is_service', 0)->orderBy('id', 'desc')->paginate(20);
-            $query->whereIn('id', $productIds)->orderBy('id', 'desc')->paginate(20);
-            $query->whereIn('id', $productIds)->orderBy('id', 'desc')->get();
-            $data['categories'] = Category::whereIn('id', $categoryds)->orderBy('id', 'desc')->get();
-            $query->whereIn('id', $productIds)->count();
+            $data['subCategories'] = collect();
+        }
+
+        if ($targetBranchId) {
+            $data['categories'] = Category::whereExists(function ($q) use ($targetBranchId) {
+                $q->select(DB::raw(1))
+                    ->from('branch_categories')
+                    ->whereColumn('branch_categories.category_id', 'categories.id')
+                    ->where('branch_categories.branch_id', $targetBranchId);
+            })->orderBy('name', 'asc')->get(['id', 'name']);
+        } else {
+            $data['categories'] = Category::orderBy('name', 'asc')->get(['id', 'name']);
+        }
+
+        $query = Product::with([
+            'brand',
+            'category',
+            'subCategory',
+            'unit.related_unit',
+            'product_variations.size',
+            'product_variations.color'
+        ])->where('is_service', 0);
+
+        if ($userBranchId != 1) {
+            $query->whereExists(function ($q) use ($userBranchId) {
+                $q->select(DB::raw(1))
+                    ->from('branch_products')
+                    ->whereColumn('branch_products.product_id', 'products.id')
+                    ->where('branch_products.branch_id', $userBranchId);
+            });
+        } elseif ($filterBranchId && empty($request->barcode) && empty($request->product_id)) {
+            $query->whereExists(function ($q) use ($filterBranchId) {
+                $q->select(DB::raw(1))
+                    ->from('branch_products')
+                    ->whereColumn('branch_products.product_id', 'products.id')
+                    ->where('branch_products.branch_id', $filterBranchId);
+            });
         }
 
         $data['com'] = BusinessSetting::where('id', 6)->first();
 
-        if ($request->product_id != null) {
+        if ($request->filled('product_id')) {
             $query->where('id', $request->product_id);
         }
+
         if ($request->filled('barcode')) {
             $barcodeVal = trim($request->barcode);
             $resolved = function_exists('resolveProductAndVariationFromBarcode') ? resolveProductAndVariationFromBarcode($barcodeVal) : ['product_id' => null];
-            if ($resolved['product_id']) {
+            if (!empty($resolved['product_id'])) {
                 $query->where('id', $resolved['product_id']);
             } else {
                 $query->where(function($q) use ($barcodeVal) {
@@ -81,18 +105,19 @@ class ProductController extends Controller
                 });
             }
         }
-        if ($request->category_id != null) {
+
+        if ($request->filled('category_id')) {
             $query->where('category_id', $request->category_id);
         }
-        if ($request->sub_category_id != null) {
+
+        if ($request->filled('sub_category_id')) {
             $query->where('sub_category_id', $request->sub_category_id);
         }
-        if ($request->category_id != null && $request->product_id != null) {
-            $query->where('category_id', $request->category_id)->where('id', $request->product_id);
-        }
+
         $data['products'] = $query
             ->orderBy('created_at', 'DESC')
-            ->paginate(10)->appends($request->all());
+            ->paginate(10)
+            ->appends($request->all());
 
         return view('backend.pages.product.index', $data);
     }
@@ -105,25 +130,17 @@ class ProductController extends Controller
 
         if ($userBranchId == 1) {
             if ($filterBranchId) {
-                $productIds = BranchProduct::where('branch_id', $filterBranchId)->pluck('product_id');
                 $categoryds = BranchCategory::where('branch_id', $filterBranchId)->pluck('category_id');
                 $brandids = BranchBrand::where('branch_id', $filterBranchId)->pluck('brand_id');
-                $data['products'] = Product::whereIn('id', $productIds)->orderBy('id', 'desc')->paginate(20);
-                $data['allProduct'] = Product::whereIn('id', $productIds)->orderBy('id', 'desc')->get();
                 $data['categories'] = Category::whereIn('id', $categoryds)->orderBy('id', 'desc')->get();
                 $data['brands'] = Brand::whereIn('id', $brandids)->orderBy('id', 'desc')->get();
             } else {
-                $data['allProduct'] = Product::orderBy('id', 'desc')->get();
-                $data['products']  = Product::orderBy('id', 'desc')->paginate(20);
                 $data['categories'] = Category::orderBy('id', 'desc')->get();
                 $data['brands'] = Brand::orderBy('id', 'desc')->get();
             }
         } else {
             $categoryds = BranchCategory::where('branch_id', $userBranchId)->pluck('category_id');
             $brandids = BranchBrand::where('branch_id', $userBranchId)->pluck('brand_id');
-            $productIds = BranchProduct::where('branch_id', $userBranchId)->pluck('product_id');
-            $data['products']  = Product::whereIn('id', $productIds)->orderBy('id', 'desc')->paginate(20);
-            $data['allProduct'] = Product::whereIn('id', $productIds)->orderBy('id', 'desc')->get();
             $data['categories'] = Category::whereIn('id', $categoryds)->orderBy('id', 'desc')->get();
             $data['brands'] = Brand::whereIn('id', $brandids)->orderBy('id', 'desc')->get();
         }
@@ -206,6 +223,14 @@ class ProductController extends Controller
         $product->status = $request->status;
         $product->description = $request->description;
         $product->imei = $request->imei;
+
+        // Medicine and Expire Date Configuration
+        $product->product_type = $request->product_type ?? 'general';
+        $product->generic_name = $request->generic_name;
+        $product->company = $request->company;
+        $product->strength = $request->strength;
+        $product->dosage_form = $request->dosage_form;
+        $product->has_expire_date = $request->has_expire_date ? 1 : 0;
 
         // Warranty configuration
         $product->warranty_id = $request->warranty_id ?? null;
@@ -482,6 +507,14 @@ class ProductController extends Controller
         $product->description = $request->description;
         $product->imei = $request->imei;
 
+        // Medicine and Expire Date Configuration
+        $product->product_type = $request->product_type ?? 'general';
+        $product->generic_name = $request->generic_name;
+        $product->company = $request->company;
+        $product->strength = $request->strength;
+        $product->dosage_form = $request->dosage_form;
+        $product->has_expire_date = $request->has_expire_date ? 1 : 0;
+
         // Warranty configuration
         $product->warranty_id = $request->warranty_id ?? null;
         if ($request->filled('warranty_id')) {
@@ -743,20 +776,46 @@ class ProductController extends Controller
 
     public function search(Request $request)
     {
-        $data['product_id'] = $request->product_id;
-        $data['category_id'] = $request->category_id;
+        return $this->index($request);
+    }
 
-        if ($request->product_id != null) {
-            $data['products'] = Product::with(['brand', 'category', 'unit.related_unit'])
-                ->where('id', $request->product_id)
-                ->paginate(10);
+    public function ajaxSearch(Request $request)
+    {
+        $search = trim($request->get('q', ''));
+        $userBranchId = auth()->user() ? auth()->user()->branch_id : 1;
+        $filterBranchId = session('branch_filter_id', $userBranchId);
+        $targetBranchId = ($userBranchId == 1) ? $filterBranchId : $userBranchId;
+
+        $query = Product::where('is_service', 0);
+
+        if ($targetBranchId) {
+            $query->whereExists(function ($q) use ($targetBranchId) {
+                $q->select(DB::raw(1))
+                    ->from('branch_products')
+                    ->whereColumn('branch_products.product_id', 'products.id')
+                    ->where('branch_products.branch_id', $targetBranchId);
+            });
         }
-        if ($request->category_id != null) {
-            $data['products'] = Product::with(['brand', 'category', 'unit.related_unit'])
-                ->where('category_id', $request->category_id)
-                ->paginate(10);
+
+        if ($search !== '') {
+            $query->where(function ($q) use ($search) {
+                $q->where('name', 'like', "%{$search}%")
+                  ->orWhere('barcode', 'like', "%{$search}%");
+            });
         }
-        return view('backend.pages.product.index', $data);
+
+        $products = $query->orderBy('name', 'asc')
+            ->limit(30)
+            ->get(['id', 'name', 'barcode']);
+
+        $results = $products->map(function ($item) {
+            return [
+                'id' => $item->id,
+                'text' => $item->name . ($item->barcode ? " ({$item->barcode})" : ''),
+            ];
+        });
+
+        return response()->json(['results' => $results]);
     }
 
     public function updateDescription(Request $request, $id)

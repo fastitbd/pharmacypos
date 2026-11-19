@@ -153,6 +153,7 @@
                                             @endif
                                             <th width="">{{ __('Rate') }}</th>
                                             <th width="">{{ __('Quantity') }}</th>
+                                            <th width="12%">{{ __('Expire Date') }}</th>
                                             @if (env('APP_WARRANTY') == 'yes')
                                             <th width="">{{ __('Warranty') }}</th>
                                             @endif
@@ -272,6 +273,9 @@
                                                             onchange="recalcRow(this)" oninput="recalcRow(this)">
                                                     @endif
                                                 </div>
+                                            </td>
+                                            <td style="width: 140px;">
+                                                <input type="date" class="form-control form-control-sm" name="new_expire_date[{{ $key }}]" value="{{ $item->expire_date }}">
                                             </td>
                                             @if (env('APP_WARRANTY') == 'yes')
                                             <td class="text-center align-middle">
@@ -826,6 +830,9 @@
                         <div class="form-row" style="min-width: 100px;">
                             ${quantity_data}
                         </div>
+                    </td>
+                    <td style="width: 140px;">
+                        <input type="date" class="form-control form-control-sm" name="new_expire_date[${indexToUse}]" value="">
                     </td>
                     @if (env('APP_WARRANTY') == 'yes')
                     <td class="text-center align-middle">

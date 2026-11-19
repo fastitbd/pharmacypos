@@ -350,6 +350,7 @@ Route::middleware(['auth:sanctum', config('jetstream.auth_session'), 'verified',
         Route::post('/product/update/{id}', 'update')->name('product.update');
         Route::post('/product/destroy/{id}', 'destroy')->name('product.destroy');
         Route::get('/product/search', 'search')->name('product.search');
+        Route::get('/product/ajax-search', 'ajaxSearch')->name('product.ajax-search');
         Route::get('/multiple/barcode', 'multipleBarcode')->name('multiple.barcode');
         Route::post('/multiple/barcode/print', 'print')->name('multiple.barcode-print')->withoutMiddleware('permission');
         Route::post('/product/update-description/{id}', 'updateDescription')->name('product.update-description');
@@ -424,6 +425,7 @@ Route::middleware(['auth:sanctum', config('jetstream.auth_session'), 'verified',
     // --------------------> Reports <--------------------
     Route::controller(ReportController::class)->prefix('report')->name('report.')->group(function () {
         Route::get('/stock', 'stock')->name('stock');
+        Route::get('/product-expire-details/{id}', 'productExpireDetails')->name('product.expire-details');
         Route::get('used/stock', 'usedStock')->name('used-stock');
         Route::get('/daily', 'daily')->name('daily');
         Route::get('/sale', 'sale')->name('sale');

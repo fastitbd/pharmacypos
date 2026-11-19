@@ -71,6 +71,11 @@ class Product extends Model
         return $this->belongsTo(Warranty::class, 'warranty_id');
     }
 
+    public function branch_products()
+    {
+        return $this->hasMany(BranchProduct::class, 'product_id');
+    }
+
     public function racks()
     {
         return $this->belongsToMany(Rack::class, 'product_rack', 'product_id', 'rack_id');

@@ -51,8 +51,8 @@
                 <div class="card-body pt-1">
                     <form action="{{ route('product.index') }}" method="GET">
                         @php
-                            $categories = App\Models\Category::get();
-                            $produc = App\Models\Product::get();
+                            $categories = $categories ?? App\Models\Category::orderBy('name', 'asc')->get(['id', 'name']);
+                            $selectedProduct = !empty($product_id) ? App\Models\Product::find($product_id) : null;
                         @endphp
                         <div class="row">
 
@@ -62,12 +62,11 @@
                             </div>
 
                             <div class="col-md-3 mt-1">
-                                <select name="product_id" id="" class="select2">
+                                <select name="product_id" id="product_search_select" class="form-control select2-ajax-product">
                                     <option value="">{{ __('All Product') }}</option>
-                                    @foreach ($produc as $item)
-                                        <option value="{{ $item->id }}"{{ ($product_id ?? '') == $item->id ? 'selected' : '' }}>
-                                            {{ $item->name }}</option>
-                                    @endforeach
+                                    @if ($selectedProduct)
+                                        <option value="{{ $selectedProduct->id }}" selected>{{ $selectedProduct->name }}</option>
+                                    @endif
                                 </select>
                             </div>
                             <div class="col-md-2 mt-1">
@@ -131,20 +130,20 @@
 
                                         if ($userBranchId == 1) {
                                             if ($filterBranchId) {
-                                                $branch_product = App\Models\BranchProduct::where(
+                                                $branch_product = App\Models\BranchProduct::with('branch')->where(
                                                     'branch_id',
                                                     $filterBranchId,
                                                 )
                                                     ->where('product_id', $data->id)
                                                     ->get();
                                             } else {
-                                                $branch_product = App\Models\BranchProduct::where(
+                                                $branch_product = App\Models\BranchProduct::with('branch')->where(
                                                     'product_id',
                                                     $data->id,
                                                 )->get();
                                             }
                                         } else {
-                                            $branch_product = App\Models\BranchProduct::where('product_id', $data->id)
+                                            $branch_product = App\Models\BranchProduct::with('branch')->where('product_id', $data->id)
                                                 ->where('branch_id', $userBranchId)
                                                 ->get();
                                         }
@@ -283,6 +282,30 @@
 @push('js')
     <script>
         $(document).ready(function() {
+            if ($.isFunction($.fn.select2)) {
+                $('.select2-ajax-product').select2({
+                    placeholder: "{{ __('All Product') }}",
+                    allowClear: true,
+                    ajax: {
+                        url: "{{ route('product.ajax-search') }}",
+                        dataType: 'json',
+                        delay: 250,
+                        data: function(params) {
+                            return {
+                                q: params.term || ''
+                            };
+                        },
+                        processResults: function(data) {
+                            return {
+                                results: [{ id: '', text: "{{ __('All Product') }}" }].concat(data.results || [])
+                            };
+                        },
+                        cache: true
+                    },
+                    minimumInputLength: 0,
+                    width: '100%'
+                });
+            }
             // Update barcode variation for the correct row
             function getVariationForRow(button) {
                 const row = $(button).closest('tr');

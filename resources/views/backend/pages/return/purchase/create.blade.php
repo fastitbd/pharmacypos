@@ -81,6 +81,11 @@
                                                 <input type="hidden" name="item_id[]" value="{{ $item->id }}">
                                                 <td class="table_data_style_left">
                                                     {{ $item->product?->name }} - {{ $item->product?->barcode }}
+                                                    @if (!empty($item->expire_date))
+                                                        <br><span class="badge badge-info text-dark font-weight-bold" style="font-size: 11px;">
+                                                            <i class="fa fa-calendar-alt"></i> Exp: {{ date('d M, Y', strtotime($item->expire_date)) }}
+                                                        </span>
+                                                    @endif
                                                     <input type="hidden" value="{{ $item->product?->id }}"
                                                         name="product_id[]" />
                                                 </td>

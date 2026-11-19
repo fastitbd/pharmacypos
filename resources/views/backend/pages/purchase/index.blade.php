@@ -116,10 +116,7 @@
             <div class="card m-b-30 card_style">
                 <div class="card-body pt-1">
                     <form action="{{ route('purchase.index') }}" method="GET">
-                        @php
-                            $products = App\Models\Product::get();
-                        @endphp
-                        <div class="row h-hide px-2">
+                                                <div class="row h-hide px-2">
                             <div class="col-md col-12 mt-2 px-1">
                                 <input type="date" class="form-control" name="startDate" value="{{ $startDate }}" />
                             </div>

@@ -1947,4 +1947,62 @@ class ReportController extends Controller
             'totalProfit'
         ));
     }
+
+    public function productExpireDetails($id, Request $request)
+    {
+        $product = Product::with('unit.related_unit')->findOrFail($id);
+        $userBranchId = auth()->user() ? auth()->user()->branch_id : 1;
+        $filterBranchId = session('branch_filter_id', null);
+        $activeBranchId = $request->filled('branch_id') ? $request->branch_id : (($userBranchId == 1 && $filterBranchId) ? $filterBranchId : ($userBranchId == 1 ? null : $userBranchId));
+
+        $query = PurchaseItem::where('product_id', $id)
+            ->whereNotNull('expire_date')
+            ->where('expire_date', '!=', '');
+
+        if ($activeBranchId) {
+            $query->where('branch_id', $activeBranchId);
+        }
+
+        $batches = $query->select(
+                'expire_date',
+                DB::raw('SUM(CASE WHEN rtn_main IS NOT NULL THEN (actual_main + rtn_main) ELSE main_qty END) as total_in_main'),
+                DB::raw('SUM(CASE WHEN rtn_sub IS NOT NULL THEN (actual_sub + rtn_sub) ELSE sub_qty END) as total_in_sub'),
+                DB::raw('SUM(stock_qty) as total_available_stock')
+            )
+            ->groupBy('expire_date')
+            ->orderBy('expire_date', 'asc')
+            ->get();
+
+        $unit = $product->unit;
+        $relatedValue = ($unit && $unit->related_value > 0) ? (float)$unit->related_value : 1;
+
+        $details = $batches->map(function ($b) use ($unit, $relatedValue) {
+            $formattedDate = Carbon::parse($b->expire_date)->format('d M, Y');
+
+            // Stock in
+            $stockIn = (float)$b->total_in_main;
+            if ($unit && $unit->related_unit != null) {
+                $stockIn += ((float)$b->total_in_sub / $relatedValue);
+            }
+
+            // Available stock
+            $availStock = (float)$b->total_available_stock;
+            if ($unit && $unit->related_unit != null) {
+                $availStock = $availStock / $relatedValue;
+            }
+
+            return [
+                'expire_date' => $b->expire_date,
+                'formatted_date' => $formattedDate,
+                'stock_in' => number_format($stockIn, 2),
+                'stock_asy' => (float)$availStock == (int)$availStock ? (int)$availStock : number_format($availStock, 2),
+            ];
+        });
+
+        return response()->json([
+            'status' => 'success',
+            'product_name' => $product->name,
+            'data' => $details
+        ]);
+    }
 }
