@@ -39,25 +39,28 @@
                             </div>
 
                             {{-- Medicine specific fields --}}
-                            <div class="mt-2 col-md-3 medicine-field">
+                            @php
+                                $isMedicine = old('product_type', 'general') == 'medicine';
+                            @endphp
+                            <div class="mt-2 col-md-3 medicine-field" style="{{ $isMedicine ? '' : 'display: none;' }}">
                                 <label for="generic_name" class="form-label fw-bold">{{ __('Generic Name') }}</label>
                                 <input type="text" class="form-control" name="generic_name" id="generic_name" value="{{ old('generic_name') }}"
-                                    placeholder="{{ __('Generic Name') }}" disabled>
+                                    placeholder="{{ __('Generic Name') }}" {{ $isMedicine ? '' : 'disabled' }}>
                             </div>
-                            <div class="mt-2 col-md-3 medicine-field">
+                            <div class="mt-2 col-md-3 medicine-field" style="{{ $isMedicine ? '' : 'display: none;' }}">
                                 <label for="company" class="form-label fw-bold">{{ __('Company') }}</label>
                                 <input type="text" class="form-control" name="company" id="company" value="{{ old('company') }}"
-                                    placeholder="{{ __('Company Name') }}" disabled>
+                                    placeholder="{{ __('Company Name') }}" {{ $isMedicine ? '' : 'disabled' }}>
                             </div>
-                            <div class="mt-2 col-md-3 medicine-field">
+                            <div class="mt-2 col-md-3 medicine-field" style="{{ $isMedicine ? '' : 'display: none;' }}">
                                 <label for="strength" class="form-label fw-bold">{{ __('Strength') }}</label>
                                 <input type="text" class="form-control" name="strength" id="strength" value="{{ old('strength') }}"
-                                    placeholder="{{ __('e.g. 500mg') }}" disabled>
+                                    placeholder="{{ __('e.g. 500mg') }}" {{ $isMedicine ? '' : 'disabled' }}>
                             </div>
-                            <div class="mt-2 col-md-3 medicine-field">
+                            <div class="mt-2 col-md-3 medicine-field" style="{{ $isMedicine ? '' : 'display: none;' }}">
                                 <label for="dosage_form" class="form-label fw-bold">{{ __('Dosage Form') }}</label>
                                 <input type="text" class="form-control" name="dosage_form" id="dosage_form" value="{{ old('dosage_form') }}"
-                                    placeholder="{{ __('e.g. Tablet, Syrup') }}" disabled>
+                                    placeholder="{{ __('e.g. Tablet, Syrup') }}" {{ $isMedicine ? '' : 'disabled' }}>
                             </div>
 
                             {{-- Product name --}}
@@ -251,9 +254,9 @@
                                 </select>
                                 <div class="errors">{{ $errors->has('status') ? $errors->first('status') : '' }}</div>
                             </div>
-                            <div class="col-md-6 mt-2 d-flex align-items-center">
+                            <div class="col-md-6 mt-2 d-flex align-items-center expire-date-field" style="{{ $isMedicine ? '' : 'display: none;' }}">
                                 <div class="custom-control custom-checkbox mt-4">
-                                    <input type="checkbox" class="custom-control-input" id="has_expire_date" name="has_expire_date" value="1" {{ old('has_expire_date') ? 'checked' : '' }}>
+                                    <input type="checkbox" class="custom-control-input" id="has_expire_date" name="has_expire_date" value="1" {{ old('has_expire_date', $isMedicine ? 1 : 0) ? 'checked' : '' }}>
                                     <label class="custom-control-label fw-bold text-dark cursor-pointer" for="has_expire_date" style="font-size: 14px;">
                                         {{ __('Has Expire Date') }}
                                     </label>
@@ -967,12 +970,17 @@
             function toggleMedicineFields() {
                 let isMedicine = $('#type_medicine').is(':checked');
                 if (isMedicine) {
+                    $('.medicine-field').show();
                     $('.medicine-field input').prop('disabled', false).removeClass('bg-light');
+                    $('.expire-date-field').show();
                     if (!$('#has_expire_date').data('user-touched')) {
                         $('#has_expire_date').prop('checked', true);
                     }
                 } else {
+                    $('.medicine-field').hide();
                     $('.medicine-field input').prop('disabled', true).addClass('bg-light');
+                    $('.expire-date-field').hide();
+                    $('#has_expire_date').prop('checked', false);
                 }
             }
 

@@ -225,12 +225,21 @@ class ProductController extends Controller
         $product->imei = $request->imei;
 
         // Medicine and Expire Date Configuration
-        $product->product_type = $request->product_type ?? 'general';
-        $product->generic_name = $request->generic_name;
-        $product->company = $request->company;
-        $product->strength = $request->strength;
-        $product->dosage_form = $request->dosage_form;
-        $product->has_expire_date = $request->has_expire_date ? 1 : 0;
+        $productType = $request->product_type ?? 'general';
+        $product->product_type = $productType;
+        if ($productType === 'medicine') {
+            $product->generic_name = $request->generic_name;
+            $product->company = $request->company;
+            $product->strength = $request->strength;
+            $product->dosage_form = $request->dosage_form;
+            $product->has_expire_date = $request->has_expire_date ? 1 : 0;
+        } else {
+            $product->generic_name = null;
+            $product->company = null;
+            $product->strength = null;
+            $product->dosage_form = null;
+            $product->has_expire_date = 0;
+        }
 
         // Warranty configuration
         $product->warranty_id = $request->warranty_id ?? null;
@@ -508,12 +517,21 @@ class ProductController extends Controller
         $product->imei = $request->imei;
 
         // Medicine and Expire Date Configuration
-        $product->product_type = $request->product_type ?? 'general';
-        $product->generic_name = $request->generic_name;
-        $product->company = $request->company;
-        $product->strength = $request->strength;
-        $product->dosage_form = $request->dosage_form;
-        $product->has_expire_date = $request->has_expire_date ? 1 : 0;
+        $productType = $request->product_type ?? 'general';
+        $product->product_type = $productType;
+        if ($productType === 'medicine') {
+            $product->generic_name = $request->generic_name;
+            $product->company = $request->company;
+            $product->strength = $request->strength;
+            $product->dosage_form = $request->dosage_form;
+            $product->has_expire_date = $request->has_expire_date ? 1 : 0;
+        } else {
+            $product->generic_name = null;
+            $product->company = null;
+            $product->strength = null;
+            $product->dosage_form = null;
+            $product->has_expire_date = 0;
+        }
 
         // Warranty configuration
         $product->warranty_id = $request->warranty_id ?? null;
